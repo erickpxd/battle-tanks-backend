@@ -1,37 +1,86 @@
-using BattleTanks.Infrastructure.Persistence.Context;
-using Microsoft.EntityFrameworkCore;
+using BattleTanks.Application;
+using BattleTanks.Infrastructure;
 using DotNetEnv;
+using Microsoft.OpenApi.Models;
 
-// Load environment variables from .env file climbing up directories
+// Load .env file climbing up directories (supports running from src/ subdirectory)
 Env.TraversePath().Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// -----------------------------------------------------------------------
+// Services
+// -----------------------------------------------------------------------
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
 
-// Build Connection String from .env variables
-var connectionString = $"Host=localhost;Port={Environment.GetEnvironmentVariable("POSTGRES_PORT")};Database={Environment.GetEnvironmentVariable("POSTGRES_DB")};Username={Environment.GetEnvironmentVariable("POSTGRES_USER")};Password={Environment.GetEnvironmentVariable("POSTGRES_PASSWORD")}";
-
-// Configure DbContext with PostgreSQL
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString));
+// CORS for Angular frontend
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:4200", "http://127.0.0.1:4200")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
 
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
+// Swagger with JWT Bearer support
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title   = "BattleTanks API",
+        Version = "v1",
+        Description = "REST API for Battle Tanks Multiplayer — Auth & Rooms"
+    });
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name         = "Authorization",
+        Type         = SecuritySchemeType.Http,
+        Scheme       = "bearer",
+        BearerFormat = "JWT",
+        In           = ParameterLocation.Header,
+        Description  = "Enter your JWT token. Example: eyJhbGci..."
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id   = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// -----------------------------------------------------------------------
+// Pipeline
+// -----------------------------------------------------------------------
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
+app.UseCors("AllowFrontend");
+
 app.UseHttpsRedirection();
 
+app.UseAuthentication(); // must come before UseAuthorization
 app.UseAuthorization();
 
 app.MapControllers();

@@ -1,6 +1,8 @@
 using BattleTanks.Application.Abstractions;
+using BattleTanks.Application.Chat;
 using BattleTanks.Infrastructure.Authentication;
 using BattleTanks.Infrastructure.Persistence.Context;
+using BattleTanks.Infrastructure.Persistence.Memory;
 using BattleTanks.Infrastructure.Persistence.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +29,7 @@ public static class DependencyInjection
         // Repositories
         services.AddScoped<IPlayerRepository, PlayerRepository>();
         services.AddScoped<IGameSessionRepository, GameSessionRepository>();
+        services.AddSingleton<ISimulatedChatRepository, SimulatedChatRepository>();
 
         // Security services
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
