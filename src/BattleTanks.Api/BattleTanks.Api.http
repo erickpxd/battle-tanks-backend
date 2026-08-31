@@ -1,0 +1,6 @@
+@BattleTanks.Api_HostAddress = http://localhost:5049
+
+# Placeholder for future BattleTanks API requests
+# Example: POST {{BattleTanks.Api_HostAddress}}/api/auth/register
+
+###
