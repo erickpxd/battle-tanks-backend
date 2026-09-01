@@ -12,11 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -36,6 +32,20 @@ services:
       timeout: 5s
       retries: 5
 
+  influxdb:
+    image: influxdb:1.8
+    container_name: battle-tanks-influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=k6
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=admin
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+
 volumes:
   postgres_data:
   redis_data:
+  influxdb_data:
