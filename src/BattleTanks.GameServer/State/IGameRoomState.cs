@@ -12,6 +12,8 @@ public interface IGameRoomState
 
     RealtimePlayer Move(string connectionId, PlayerMoveRequest request, DateTime serverReceivedAt);
 
+    RealtimePlayer Hit(string connectionId, PlayerHitRequest request, DateTime serverReceivedAt);
+
     PlayerDeparture? Leave(string connectionId);
 }
 

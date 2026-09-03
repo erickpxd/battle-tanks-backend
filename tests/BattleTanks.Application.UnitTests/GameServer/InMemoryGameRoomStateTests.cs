@@ -44,4 +44,39 @@ public class InMemoryGameRoomStateTests
         state.Leave("connection-1")!.RemainingPlayers.Should().ContainSingle();
         state.Leave("connection-2")!.RemainingPlayers.Should().BeEmpty();
     }
+
+    [Fact]
+    public void Hit_ShouldDamageTheTargetPlayerAndKeepTheShooterUnchanged()
+    {
+        var state = new InMemoryGameRoomState();
+        var shooterId = Guid.NewGuid();
+        var targetId = Guid.NewGuid();
+        state.Join("ROOM-ONE", "connection-1", shooterId, "Ana");
+        state.Join("ROOM-ONE", "connection-2", targetId, "Bia");
+        var request = new PlayerHitRequest(targetId, 25, "hit-1", 1000);
+
+        var target = state.Hit("connection-1", request, DateTime.UnixEpoch);
+
+        target.Id.Should().Be(targetId);
+        target.Health.Should().Be(75);
+        target.Status.Should().Be("active");
+        target.EventId.Should().Be("hit-1");
+    }
+
+    [Fact]
+    public void Hit_ShouldDestroyTheTargetAtZeroHealth()
+    {
+        var state = new InMemoryGameRoomState();
+        var targetId = Guid.NewGuid();
+        state.Join("ROOM-ONE", "connection-1", Guid.NewGuid(), "Ana");
+        state.Join("ROOM-ONE", "connection-2", targetId, "Bia");
+
+        var target = state.Hit(
+            "connection-1",
+            new PlayerHitRequest(targetId, 100, "hit-1", 1000),
+            DateTime.UnixEpoch);
+
+        target.Health.Should().Be(0);
+        target.Status.Should().Be("destroyed");
+    }
 }

@@ -72,6 +72,43 @@ public sealed class InMemoryGameRoomState : IGameRoomState
         }
     }
 
+    public RealtimePlayer Hit(
+        string connectionId,
+        PlayerHitRequest request,
+        DateTime serverReceivedAt)
+    {
+        lock (_sync)
+        {
+            if (!_connections.TryGetValue(connectionId, out var membership) ||
+                !_rooms.TryGetValue(membership.RoomCode, out var players))
+            {
+                throw new InvalidOperationException("The connection has not joined a game room.");
+            }
+
+            if (membership.PlayerId == request.TargetPlayerId)
+            {
+                throw new InvalidOperationException("A player cannot hit their own tank.");
+            }
+
+            if (!players.TryGetValue(request.TargetPlayerId, out var target))
+            {
+                throw new InvalidOperationException("The target player is not connected to this room.");
+            }
+
+            var health = Math.Max(target.Player.Health - request.Damage, 0);
+            target.Player = target.Player with
+            {
+                Health = health,
+                Status = health == 0 ? "destroyed" : "active",
+                EventId = request.EventId,
+                ClientSentAtUnixMs = request.ClientSentAtUnixMs,
+                ServerReceivedAt = serverReceivedAt
+            };
+
+            return target.Player;
+        }
+    }
+
     public PlayerDeparture? Leave(string connectionId)
     {
         lock (_sync)

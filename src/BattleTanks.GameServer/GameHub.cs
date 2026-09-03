@@ -101,6 +101,40 @@ public sealed class GameHub : Hub
         return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
     }
 
+    public async Task<RealtimeAck> HitPlayer(PlayerHitRequest request)
+    {
+        if (request.TargetPlayerId == Guid.Empty)
+        {
+            throw new HubException("A valid target player is required.");
+        }
+
+        if (request.Damage is < 1 or > 100)
+        {
+            throw new HubException("Player damage must be between 1 and 100.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.EventId))
+        {
+            throw new HubException("An event identifier is required.");
+        }
+
+        var roomCode = GetJoinedRoomCode();
+        var serverReceivedAt = DateTime.UtcNow;
+
+        RealtimePlayer player;
+        try
+        {
+            player = _gameRoomState.Hit(Context.ConnectionId, request, serverReceivedAt);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new HubException(exception.Message);
+        }
+
+        await Clients.Group(roomCode).SendAsync("ReceivePlayerHit", player);
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
+    }
+
     public async Task<RealtimeAck> DestroyMapTile(MapTileChangeRequest request)
     {
         if (request.Column < 0 || request.Row < 0)
