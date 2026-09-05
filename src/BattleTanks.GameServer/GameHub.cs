@@ -1,0 +1,218 @@
+using System.Security.Claims;
+using BattleTanks.Application.Chat;
+using BattleTanks.Contracts.Realtime;
+using BattleTanks.Contracts.Responses.Chat;
+using BattleTanks.GameServer.State;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
+
+namespace BattleTanks.GameServer;
+
+[Authorize]
+public sealed class GameHub : Hub
+{
+    public const string Route = "/hubs/game";
+
+    private static readonly HashSet<string> ValidDirections =
+        new(StringComparer.OrdinalIgnoreCase) { "up", "down", "left", "right" };
+
+    private readonly IGameRoomState _gameRoomState;
+    private readonly ISimulatedChatRepository _chatRepository;
+
+    public GameHub(
+        IGameRoomState gameRoomState,
+        ISimulatedChatRepository chatRepository)
+    {
+        _gameRoomState = gameRoomState;
+        _chatRepository = chatRepository;
+    }
+
+    public async Task JoinRoom(string roomCode)
+    {
+        var normalizedRoomCode = NormalizeRoomCode(roomCode);
+        var (playerId, playerName) = ReadPlayerIdentity();
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, normalizedRoomCode);
+        var players = _gameRoomState.Join(
+            normalizedRoomCode,
+            Context.ConnectionId,
+            playerId,
+            playerName);
+
+        await Clients.Caller.SendAsync("ReceiveLocalPlayerId", playerId);
+        await Clients.Caller.SendAsync(
+            "ReceiveChatHistory",
+            _chatRepository.GetMessages(normalizedRoomCode));
+        await Clients.Group(normalizedRoomCode).SendAsync("ReceivePlayersUpdated", players);
+    }
+
+    public async Task<RealtimeAck> MovePlayer(PlayerMoveRequest request)
+    {
+        ValidateMove(request);
+        var roomCode = GetJoinedRoomCode();
+        var serverReceivedAt = DateTime.UtcNow;
+
+        RealtimePlayer player;
+        try
+        {
+            player = _gameRoomState.Move(Context.ConnectionId, request, serverReceivedAt);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new HubException(exception.Message);
+        }
+
+        await Clients.OthersInGroup(roomCode).SendAsync("ReceivePlayerMove", player);
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
+    }
+
+    public async Task<RealtimeAck> SendChatMessage(RealtimeChatRequest request)
+    {
+        var messageText = request.Message?.Trim() ?? string.Empty;
+        if (messageText.Length is < 1 or > 250)
+        {
+            throw new HubException("Chat messages must contain between 1 and 250 characters.");
+        }
+
+        var roomCode = GetJoinedRoomCode();
+        var (playerId, playerName) = ReadPlayerIdentity();
+        var serverReceivedAt = DateTime.UtcNow;
+        var storedMessage = new ChatResponse
+        {
+            Id = Guid.NewGuid(),
+            PlayerId = playerId,
+            PlayerName = playerName,
+            Message = messageText,
+            Timestamp = serverReceivedAt
+        };
+        _chatRepository.AddMessage(roomCode, storedMessage);
+
+        var realtimeMessage = new RealtimeChatMessage(
+            storedMessage.Id,
+            storedMessage.PlayerId,
+            storedMessage.PlayerName,
+            storedMessage.Message,
+            storedMessage.Timestamp,
+            request.EventId,
+            request.ClientSentAtUnixMs,
+            serverReceivedAt);
+
+        await Clients.Group(roomCode).SendAsync("ReceiveChatMessage", realtimeMessage);
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
+    }
+
+    public async Task<RealtimeAck> HitPlayer(PlayerHitRequest request)
+    {
+        if (request.TargetPlayerId == Guid.Empty)
+        {
+            throw new HubException("A valid target player is required.");
+        }
+
+        if (request.Damage is < 1 or > 100)
+        {
+            throw new HubException("Player damage must be between 1 and 100.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.EventId))
+        {
+            throw new HubException("An event identifier is required.");
+        }
+
+        var roomCode = GetJoinedRoomCode();
+        var serverReceivedAt = DateTime.UtcNow;
+
+        RealtimePlayer player;
+        try
+        {
+            player = _gameRoomState.Hit(Context.ConnectionId, request, serverReceivedAt);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new HubException(exception.Message);
+        }
+
+        await Clients.Group(roomCode).SendAsync("ReceivePlayerHit", player);
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
+    }
+
+    public async Task<RealtimeAck> DestroyMapTile(MapTileChangeRequest request)
+    {
+        if (request.Column < 0 || request.Row < 0)
+        {
+            throw new HubException("Map tile coordinates cannot be negative.");
+        }
+
+        var roomCode = GetJoinedRoomCode();
+        var serverReceivedAt = DateTime.UtcNow;
+        await Clients.OthersInGroup(roomCode).SendAsync("ReceiveMapTileDestroyed", request);
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        var departure = _gameRoomState.Leave(Context.ConnectionId);
+        if (departure is not null)
+        {
+            await Clients.Group(departure.RoomCode)
+                .SendAsync("ReceivePlayersUpdated", departure.RemainingPlayers);
+        }
+
+        await base.OnDisconnectedAsync(exception);
+    }
+
+    private string GetJoinedRoomCode()
+    {
+        var roomCode = Context.Items["RoomCode"] as string;
+        if (string.IsNullOrWhiteSpace(roomCode))
+        {
+            throw new HubException("JoinRoom must be called before sending game events.");
+        }
+
+        return roomCode;
+    }
+
+    private string NormalizeRoomCode(string roomCode)
+    {
+        var normalized = roomCode?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (normalized.Length is < 3 or > 32)
+        {
+            throw new HubException("A valid room code is required.");
+        }
+
+        Context.Items["RoomCode"] = normalized;
+        return normalized;
+    }
+
+    private (Guid PlayerId, string PlayerName) ReadPlayerIdentity()
+    {
+        var playerIdClaim = Context.User?.FindFirstValue("sub")
+            ?? Context.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+        var playerName = Context.User?.FindFirstValue("name")
+            ?? Context.User?.FindFirstValue(ClaimTypes.Name);
+
+        if (!Guid.TryParse(playerIdClaim, out var playerId) || string.IsNullOrWhiteSpace(playerName))
+        {
+            throw new HubException("The authenticated player identity is invalid.");
+        }
+
+        return (playerId, playerName);
+    }
+
+    private static void ValidateMove(PlayerMoveRequest request)
+    {
+        if (request.X is < 0 or >= 20 || request.Y is < 0 or >= 15)
+        {
+            throw new HubException("Player coordinates are outside the game map.");
+        }
+
+        if (!ValidDirections.Contains(request.Direction))
+        {
+            throw new HubException("Player direction is invalid.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.EventId))
+        {
+            throw new HubException("An event identifier is required.");
+        }
+    }
+}
