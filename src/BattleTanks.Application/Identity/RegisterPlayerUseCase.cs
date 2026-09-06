@@ -34,7 +34,7 @@ public class RegisterPlayerUseCase
         var player = new Player
         {
             Name         = request.Username,
-            Email        = request.Email,
+            Email        = request.Email.Trim().ToLowerInvariant(),
             PasswordHash = _passwordHasher.Hash(request.Password)
         };
 

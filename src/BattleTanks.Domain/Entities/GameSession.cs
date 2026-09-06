@@ -20,6 +20,12 @@ public class GameSession
     [MaxLength(9)]
     public string RoomCode { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Logical shard key (e.g. sa-east-1). Used for region-based routing/docs in LB-7.
+    /// </summary>
+    [MaxLength(32)]
+    public string Region { get; set; } = "sa-east-1";
+
     [MaxLength(255)]
     public string MapSelected { get; set; } = string.Empty;
 

@@ -18,12 +18,22 @@ public class PlayerRepository : IPlayerRepository
         => await _context.Players.FindAsync([id], cancellationToken);
 
     public async Task<Player?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
-        => await _context.Players
-            .FirstOrDefaultAsync(p => p.Email.ToLower() == email.ToLower(), cancellationToken);
+    {
+        var normalized = NormalizeEmail(email);
+        // Read-only auth lookup — skip change tracker overhead.
+        return await _context.Players
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Email == normalized, cancellationToken);
+    }
 
     public async Task AddAsync(Player player, CancellationToken cancellationToken = default)
-        => await _context.Players.AddAsync(player, cancellationToken);
+    {
+        player.Email = NormalizeEmail(player.Email);
+        await _context.Players.AddAsync(player, cancellationToken);
+    }
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
         => await _context.SaveChangesAsync(cancellationToken);
+
+    internal static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

@@ -23,17 +23,20 @@ public sealed class GameHub : Hub
     private readonly ISimulatedChatRepository _chatRepository;
     private readonly GameEventDispatcher _gameEventDispatcher;
     private readonly IGameSessionRepository _gameSessionRepository;
+    private readonly IOnlinePresenceService _onlinePresenceService;
 
     public GameHub(
         IGameRoomState gameRoomState,
         ISimulatedChatRepository chatRepository,
         GameEventDispatcher gameEventDispatcher,
-        IGameSessionRepository gameSessionRepository)
+        IGameSessionRepository gameSessionRepository,
+        IOnlinePresenceService onlinePresenceService)
     {
         _gameRoomState = gameRoomState;
         _chatRepository = chatRepository;
         _gameEventDispatcher = gameEventDispatcher;
         _gameSessionRepository = gameSessionRepository;
+        _onlinePresenceService = onlinePresenceService;
     }
 
     public async Task JoinRoom(string roomCode)
@@ -49,11 +52,24 @@ public sealed class GameHub : Hub
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, normalizedRoomCode);
+        Context.Items["PlayerId"] = playerId;
         var players = _gameRoomState.Join(
             normalizedRoomCode,
             Context.ConnectionId,
             playerId,
             playerName);
+
+        await _onlinePresenceService.PlayerJoinedAsync(
+            normalizedRoomCode,
+            playerId,
+            playerName,
+            Context.ConnectionId,
+            Context.ConnectionAborted);
+        await _onlinePresenceService.SetRoomStatusAsync(
+            normalizedRoomCode,
+            session.Status.ToString(),
+            players.Count,
+            Context.ConnectionAborted);
 
         await Clients.Caller.SendAsync("ReceiveLocalPlayerId", playerId);
         await Clients.Caller.SendAsync(
@@ -228,6 +244,21 @@ public sealed class GameHub : Hub
         var departure = _gameRoomState.Leave(Context.ConnectionId);
         if (departure is not null)
         {
+            if (Context.Items["PlayerId"] is Guid playerId)
+            {
+                await _onlinePresenceService.PlayerLeftAsync(
+                    departure.RoomCode,
+                    playerId,
+                    Context.ConnectionId,
+                    CancellationToken.None);
+            }
+
+            await _onlinePresenceService.SetRoomStatusAsync(
+                departure.RoomCode,
+                "Waiting",
+                departure.RemainingPlayers.Count,
+                CancellationToken.None);
+
             await Clients.Group(departure.RoomCode)
                 .SendAsync("ReceivePlayersUpdated", departure.RemainingPlayers);
         }
