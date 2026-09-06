@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\BattleTanks.Contracts\BattleTanks.Contracts.csproj" />
     <ProjectReference Include="..\..\src\BattleTanks.Domain\BattleTanks.Domain.csproj" />
     <ProjectReference Include="..\..\src\BattleTanks.GameServer\BattleTanks.GameServer.csproj" />
+    <ProjectReference Include="..\..\src\BattleTanks.Infrastructure\BattleTanks.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

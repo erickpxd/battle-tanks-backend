@@ -1,4 +1,5 @@
 using BattleTanks.Application.Abstractions;
+using BattleTanks.Application.GameEvents;
 using BattleTanks.Application.Identity;
 using BattleTanks.Application.Lobby;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +18,8 @@ public static class DependencyInjection
         services.AddScoped<ListRoomsUseCase>();
         services.AddScoped<CreateRoomUseCase>();
         services.AddScoped<JoinRoomUseCase>();
+
+        services.AddSingleton<GameEventDispatcher>();
 
         return services;
     }

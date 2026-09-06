@@ -1,5 +1,8 @@
 using System.Security.Claims;
+using BattleTanks.Application.Abstractions;
 using BattleTanks.Application.Chat;
+using BattleTanks.Application.GameEvents;
+using BattleTanks.Contracts.GameEvents;
 using BattleTanks.Contracts.Realtime;
 using BattleTanks.Contracts.Responses.Chat;
 using BattleTanks.GameServer.State;
@@ -18,19 +21,32 @@ public sealed class GameHub : Hub
 
     private readonly IGameRoomState _gameRoomState;
     private readonly ISimulatedChatRepository _chatRepository;
+    private readonly GameEventDispatcher _gameEventDispatcher;
+    private readonly IGameSessionRepository _gameSessionRepository;
 
     public GameHub(
         IGameRoomState gameRoomState,
-        ISimulatedChatRepository chatRepository)
+        ISimulatedChatRepository chatRepository,
+        GameEventDispatcher gameEventDispatcher,
+        IGameSessionRepository gameSessionRepository)
     {
         _gameRoomState = gameRoomState;
         _chatRepository = chatRepository;
+        _gameEventDispatcher = gameEventDispatcher;
+        _gameSessionRepository = gameSessionRepository;
     }
 
     public async Task JoinRoom(string roomCode)
     {
         var normalizedRoomCode = NormalizeRoomCode(roomCode);
         var (playerId, playerName) = ReadPlayerIdentity();
+        var session = await _gameSessionRepository.GetByRoomCodeAsync(
+            normalizedRoomCode,
+            Context.ConnectionAborted);
+        if (session is null || session.ConnectedPlayers.All(player => player.Id != playerId))
+        {
+            throw new HubException("The authenticated player does not belong to this room.");
+        }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, normalizedRoomCode);
         var players = _gameRoomState.Join(
@@ -43,6 +59,11 @@ public sealed class GameHub : Hub
         await Clients.Caller.SendAsync(
             "ReceiveChatHistory",
             _chatRepository.GetMessages(normalizedRoomCode));
+        await Clients.Caller.SendAsync(
+            "ReceiveGameEventHistory",
+            await _gameEventDispatcher.GetRecentAsync(
+                normalizedRoomCode,
+                Context.ConnectionAborted));
         await Clients.Group(normalizedRoomCode).SendAsync("ReceivePlayersUpdated", players);
     }
 
@@ -119,6 +140,7 @@ public sealed class GameHub : Hub
         }
 
         var roomCode = GetJoinedRoomCode();
+        var (playerId, _) = ReadPlayerIdentity();
         var serverReceivedAt = DateTime.UtcNow;
 
         RealtimePlayer player;
@@ -131,20 +153,73 @@ public sealed class GameHub : Hub
             throw new HubException(exception.Message);
         }
 
-        await Clients.Group(roomCode).SendAsync("ReceivePlayerHit", player);
+        var collisionEvent = GameEventEnvelope.Create(
+            request.EventId,
+            GameEventTypes.PlayerHit,
+            roomCode,
+            playerId,
+            request.ClientSentAtUnixMs,
+            new DateTimeOffset(serverReceivedAt),
+            new PlayerHitEventData(player.Id, request.Damage, player.Health, player.Status));
+
+        // QoS 1: losing an authoritative damage event would leave critical UI notifications stale.
+        await Task.WhenAll(
+            Clients.Group(roomCode).SendAsync("ReceivePlayerHit", player),
+            _gameEventDispatcher.DispatchAsync(
+                collisionEvent,
+                GameEventQos.AtLeastOnce,
+                CancellationToken.None));
+
+        var players = _gameRoomState.GetPlayers(roomCode);
+        var activePlayers = players.Where(candidate => candidate.Status == "active").ToArray();
+        if (player.Status == "destroyed" && players.Count > 1 && activePlayers.Length <= 1)
+        {
+            var endedEvent = GameEventEnvelope.Create(
+                Guid.NewGuid().ToString("N"),
+                GameEventTypes.GameEnded,
+                roomCode,
+                playerId,
+                new DateTimeOffset(serverReceivedAt).ToUnixTimeMilliseconds(),
+                new DateTimeOffset(serverReceivedAt),
+                new GameEndedEventData(player.Id, activePlayers.SingleOrDefault()?.Id, request.EventId));
+
+            // QoS 1: game over must be delivered; eventId makes duplicate delivery harmless.
+            await _gameEventDispatcher.DispatchAsync(
+                endedEvent,
+                GameEventQos.AtLeastOnce,
+                CancellationToken.None);
+        }
+
         return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
     }
 
     public async Task<RealtimeAck> DestroyMapTile(MapTileChangeRequest request)
     {
-        if (request.Column < 0 || request.Row < 0)
+        if (request.Column is < 0 or >= 40 || request.Row is < 0 or >= 30)
         {
-            throw new HubException("Map tile coordinates cannot be negative.");
+            throw new HubException("Map tile coordinates are outside the expanded game map.");
         }
 
         var roomCode = GetJoinedRoomCode();
+        var (playerId, _) = ReadPlayerIdentity();
         var serverReceivedAt = DateTime.UtcNow;
-        await Clients.OthersInGroup(roomCode).SendAsync("ReceiveMapTileDestroyed", request);
+        var mapEvent = GameEventEnvelope.Create(
+            request.EventId,
+            GameEventTypes.MapTileDestroyed,
+            roomCode,
+            playerId,
+            request.ClientSentAtUnixMs,
+            new DateTimeOffset(serverReceivedAt),
+            new MapTileDestroyedEventData(request.Column, request.Row));
+
+        // QoS 0: SignalR remains authoritative for the map and this transient comparison event
+        // can favor throughput over retransmission.
+        await Task.WhenAll(
+            Clients.OthersInGroup(roomCode).SendAsync("ReceiveMapTileDestroyed", request),
+            _gameEventDispatcher.DispatchAsync(
+                mapEvent,
+                GameEventQos.AtMostOnce,
+                CancellationToken.None));
         return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
     }
 
@@ -174,7 +249,8 @@ public sealed class GameHub : Hub
     private string NormalizeRoomCode(string roomCode)
     {
         var normalized = roomCode?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (normalized.Length is < 3 or > 32)
+        if (normalized.Length is < 3 or > 32 ||
+            normalized.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-'))
         {
             throw new HubException("A valid room code is required.");
         }
