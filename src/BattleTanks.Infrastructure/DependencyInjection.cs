@@ -1,6 +1,8 @@
 using BattleTanks.Application.Abstractions;
 using BattleTanks.Application.Chat;
+using BattleTanks.Application.GameEvents;
 using BattleTanks.Infrastructure.Authentication;
+using BattleTanks.Infrastructure.Messaging;
 using BattleTanks.Infrastructure.Persistence.Context;
 using BattleTanks.Infrastructure.Persistence.Memory;
 using BattleTanks.Infrastructure.Persistence.Repositories;
@@ -30,6 +32,18 @@ public static class DependencyInjection
         services.AddScoped<IPlayerRepository, PlayerRepository>();
         services.AddScoped<IGameSessionRepository, GameSessionRepository>();
         services.AddSingleton<ISimulatedChatRepository, SimulatedChatRepository>();
+
+        // Room-scoped event messaging and bounded Redis history.
+        var mqttOptions = MqttOptions.From(configuration);
+        var redisOptions = RedisHistoryOptions.From(configuration);
+        services.AddSingleton(mqttOptions);
+        services.AddSingleton(redisOptions);
+        services.AddSingleton<MqttGameService>();
+        services.AddSingleton<IGameEventPublisher>(provider =>
+            provider.GetRequiredService<MqttGameService>());
+        services.AddHostedService(provider => provider.GetRequiredService<MqttGameService>());
+        services.AddSingleton<IRedisEventStore, StackExchangeRedisEventStore>();
+        services.AddSingleton<IGameEventHistory, RedisGameEventHistory>();
 
         // Security services
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();

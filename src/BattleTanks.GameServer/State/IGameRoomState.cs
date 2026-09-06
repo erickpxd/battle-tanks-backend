@@ -14,6 +14,8 @@ public interface IGameRoomState
 
     RealtimePlayer Hit(string connectionId, PlayerHitRequest request, DateTime serverReceivedAt);
 
+    IReadOnlyList<RealtimePlayer> GetPlayers(string roomCode);
+
     PlayerDeparture? Leave(string connectionId);
 }
 

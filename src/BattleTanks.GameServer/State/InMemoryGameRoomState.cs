@@ -16,6 +16,8 @@ public sealed class InMemoryGameRoomState : IGameRoomState
     private readonly Dictionary<string, Dictionary<Guid, PlayerEntry>> _rooms =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ConnectionMembership> _connections = [];
+    private readonly Dictionary<string, HashSet<string>> _processedHitEventIds =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<RealtimePlayer> Join(
         string roomCode,
@@ -95,6 +97,21 @@ public sealed class InMemoryGameRoomState : IGameRoomState
                 throw new InvalidOperationException("The target player is not connected to this room.");
             }
 
+            if (target.Player.Status == "destroyed")
+            {
+                throw new InvalidOperationException("The target player is already destroyed.");
+            }
+
+            if (!_processedHitEventIds.TryGetValue(membership.RoomCode, out var processedEvents))
+            {
+                processedEvents = [];
+                _processedHitEventIds[membership.RoomCode] = processedEvents;
+            }
+            if (!processedEvents.Add(request.EventId))
+            {
+                return target.Player;
+            }
+
             var health = Math.Max(target.Player.Health - request.Damage, 0);
             target.Player = target.Player with
             {
@@ -106,6 +123,16 @@ public sealed class InMemoryGameRoomState : IGameRoomState
             };
 
             return target.Player;
+        }
+    }
+
+    public IReadOnlyList<RealtimePlayer> GetPlayers(string roomCode)
+    {
+        lock (_sync)
+        {
+            return _rooms.TryGetValue(roomCode, out var players)
+                ? Snapshot(players)
+                : [];
         }
     }
 
@@ -136,6 +163,7 @@ public sealed class InMemoryGameRoomState : IGameRoomState
         if (players.Count == 0)
         {
             _rooms.Remove(membership.RoomCode);
+            _processedHitEventIds.Remove(membership.RoomCode);
         }
 
         return new PlayerDeparture(membership.RoomCode, snapshot);

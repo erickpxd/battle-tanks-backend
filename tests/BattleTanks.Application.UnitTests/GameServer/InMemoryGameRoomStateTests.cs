@@ -78,5 +78,21 @@ public class InMemoryGameRoomStateTests
 
         target.Health.Should().Be(0);
         target.Status.Should().Be("destroyed");
+        state.GetPlayers("ROOM-ONE").Count(player => player.Status == "active").Should().Be(1);
+    }
+
+    [Fact]
+    public void Hit_ShouldApplyTheSameEventIdOnlyOnce()
+    {
+        var state = new InMemoryGameRoomState();
+        var targetId = Guid.NewGuid();
+        state.Join("ROOM-ONE", "connection-1", Guid.NewGuid(), "Ana");
+        state.Join("ROOM-ONE", "connection-2", targetId, "Bia");
+        var request = new PlayerHitRequest(targetId, 25, "hit-once", 1000);
+
+        state.Hit("connection-1", request, DateTime.UnixEpoch);
+        var duplicateResult = state.Hit("connection-1", request, DateTime.UnixEpoch);
+
+        duplicateResult.Health.Should().Be(75);
     }
 }
