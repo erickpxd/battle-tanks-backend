@@ -19,6 +19,10 @@ public sealed class GameHub : Hub
     private static readonly HashSet<string> ValidDirections =
         new(StringComparer.OrdinalIgnoreCase) { "up", "down", "left", "right" };
 
+    // Matches frontend BattleMap: 20x15 cells with subdivision 3 → 60x45 expanded tiles.
+    private const int ExpandedMapColumns = 60;
+    private const int ExpandedMapRows = 45;
+
     private readonly IGameRoomState _gameRoomState;
     private readonly ISimulatedChatRepository _chatRepository;
     private readonly GameEventDispatcher _gameEventDispatcher;
@@ -211,7 +215,8 @@ public sealed class GameHub : Hub
 
     public async Task<RealtimeAck> DestroyMapTile(MapTileChangeRequest request)
     {
-        if (request.Column is < 0 or >= 40 || request.Row is < 0 or >= 30)
+        if (request.Column is < 0 or >= ExpandedMapColumns ||
+            request.Row is < 0 or >= ExpandedMapRows)
         {
             throw new HubException("Map tile coordinates are outside the expanded game map.");
         }
