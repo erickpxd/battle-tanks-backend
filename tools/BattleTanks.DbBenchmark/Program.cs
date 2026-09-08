@@ -7,12 +7,17 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 // LB-7 Activity 1 — measures ToList vs AsNoTracking and bulk insert throughput.
-// Usage: dotnet run --project tools/BattleTanks.DbBenchmark -- --scores 5000
+// Usage (from backend/):
+//   dotnet run --project tools/BattleTanks.DbBenchmark -- --scores 5000
 
 var scoreCount = ParseScoreCount(args);
+var repoRoot = FindBackendRoot();
+LoadLocalEnvFile(repoRoot);
+
 var configuration = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: true)
+    .SetBasePath(repoRoot)
+    .AddJsonFile("src/BattleTanks.Api/appsettings.json", optional: true)
+    .AddJsonFile("src/BattleTanks.Api/appsettings.Development.json", optional: true)
     .AddEnvironmentVariables()
     .Build();
 
@@ -132,12 +137,66 @@ static async Task ClearBenchmarkScoresAsync(ApplicationDbContext db, Guid player
 
 static string BuildConnectionStringFromEnv()
 {
+    // Local compose maps Postgres to host port 5433 by default (.env POSTGRES_PORT).
     var host = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "localhost";
-    var port = Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? "5432";
+    var port = Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? "5433";
     var db = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? "battle_tanks";
     var user = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "battle_tanks_user";
     var password = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? "battle_tanks_password";
     return $"Host={host};Port={port};Database={db};Username={user};Password={password}";
+}
+
+static string FindBackendRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "BattleTanks.sln")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "BattleTanks.sln")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    return Directory.GetCurrentDirectory();
+}
+
+static void LoadLocalEnvFile(string repoRoot)
+{
+    var envPath = Path.Combine(repoRoot, ".env");
+    if (!File.Exists(envPath))
+    {
+        return;
+    }
+
+    foreach (var rawLine in File.ReadAllLines(envPath))
+    {
+        var line = rawLine.Trim();
+        if (line.Length == 0 || line.StartsWith('#') || !line.Contains('='))
+        {
+            continue;
+        }
+
+        var separator = line.IndexOf('=');
+        var key = line[..separator].Trim();
+        var value = line[(separator + 1)..].Trim();
+        if (key.Length > 0 && Environment.GetEnvironmentVariable(key) is null)
+        {
+            Environment.SetEnvironmentVariable(key, value);
+        }
+    }
 }
 
 static string MaskConnection(string connectionString)
