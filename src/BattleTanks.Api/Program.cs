@@ -1,4 +1,5 @@
 using BattleTanks.Application;
+using BattleTanks.GameServer;
 using BattleTanks.Infrastructure;
 using DotNetEnv;
 using Microsoft.OpenApi.Models;
@@ -13,6 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 // -----------------------------------------------------------------------
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddGameServer();
 
 // CORS for Angular frontend
 builder.Services.AddCors(options =>
@@ -84,5 +86,6 @@ app.UseAuthentication(); // must come before UseAuthorization
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<GameHub>(GameHub.Route);
 
 app.Run();

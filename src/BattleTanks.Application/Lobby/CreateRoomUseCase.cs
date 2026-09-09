@@ -35,6 +35,7 @@ public class CreateRoomUseCase
         {
             RoomCode    = roomCode,
             MapSelected = request.MapSelected,
+            Region      = string.IsNullOrWhiteSpace(request.Region) ? "sa-east-1" : request.Region.Trim().ToLowerInvariant(),
             Status      = GameSessionStatus.Waiting
         };
 

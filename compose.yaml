@@ -45,7 +45,60 @@ services:
     volumes:
       - influxdb_data:/var/lib/influxdb
 
+  emqx-bootstrap:
+    image: alpine:3.20
+    container_name: battle-tanks-emqx-bootstrap
+    restart: "no"
+    environment:
+      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD}
+      MQTT_FRONTEND_PASSWORD: ${MQTT_FRONTEND_PASSWORD}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        umask 077
+        printf 'user_id,password,is_superuser\nbattle-tanks-backend,%s,false\nbattle-tanks-frontend,%s,false\n' "$$MQTT_BACKEND_PASSWORD" "$$MQTT_FRONTEND_PASSWORD" > /bootstrap/users.csv
+        chmod 0644 /bootstrap/users.csv
+    volumes:
+      - emqx_bootstrap:/bootstrap
+
+  emqx:
+    image: emqx/emqx:5.8.8
+    container_name: battle-tanks-emqx
+    restart: unless-stopped
+    environment:
+      EMQX_NAME: battle-tanks-emqx
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD}
+      EMQX_AUTHENTICATION__1__ENABLE: "true"
+      EMQX_AUTHENTICATION__1__MECHANISM: password_based
+      EMQX_AUTHENTICATION__1__BACKEND: built_in_database
+      EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
+      EMQX_AUTHENTICATION__1__PASSWORD_HASH_ALGORITHM__NAME: sha256
+      EMQX_AUTHENTICATION__1__PASSWORD_HASH_ALGORITHM__SALT_POSITION: suffix
+      EMQX_AUTHENTICATION__1__BOOTSTRAP_FILE: /opt/emqx/data/bootstrap/users.csv
+      EMQX_AUTHENTICATION__1__BOOTSTRAP_TYPE: plain
+      EMQX_AUTHORIZATION__NO_MATCH: deny
+    depends_on:
+      emqx-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "${EMQX_MQTT_PORT}:1883"
+      - "${EMQX_WS_PORT}:8083"
+      - "${EMQX_DASHBOARD_PORT}:18083"
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+      - emqx_bootstrap:/opt/emqx/data/bootstrap:ro
+      - ./infra/emqx/acl.conf:/opt/emqx/etc/acl.conf:ro
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 volumes:
   postgres_data:
   redis_data:
   influxdb_data:
+  emqx_data:
+  emqx_log:
+  emqx_bootstrap:
