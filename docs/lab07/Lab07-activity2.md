@@ -48,10 +48,11 @@ Shared `IConnectionMultiplexer` is registered once (`AddRedisConnection`) so LB-
 
 ```bash
 docker compose up -d redis postgres
-# play / join a room, then:
-redis-cli KEYS 'battle-tanks:*'
-redis-cli HGETALL battle-tanks:room:ABCD-1234:online
-redis-cli ZREVRANGE battle-tanks:ranking:global 0 9 WITHSCORES
+# after joining a room in the app:
+docker exec -it battle-tanks-redis redis-cli KEYS 'battle-tanks:*'
+docker exec -it battle-tanks-redis redis-cli HGETALL battle-tanks:room:LD2B-6VNZ:online
+docker exec -it battle-tanks-redis redis-cli ZREVRANGE battle-tanks:ranking:global 0 9 WITHSCORES
+docker exec -it battle-tanks-redis redis-cli SMEMBERS battle-tanks:players:online
 ```
 
 API:
@@ -60,18 +61,32 @@ API:
 - `POST /api/ranking/refresh` (auth)
 - `POST /api/auth/logout` (auth) → next request with same token → 401
 
-## Benchmark checklist (Postgres vs Redis)
+## Evidence — Redis keys in production use
 
-| Operation | Postgres (ms) | Redis (ms) |
+Live capture after multiplayer session (presence + ranking + JWT blacklist + LB-6 event history):
+
+![Redis KEYS, ranking SortedSet, room online Hash, global online Set](prints/04-redis-keys-online-ranking.png)
+
+Observed in this run:
+
+- `battle-tanks:room:LD2B-6VNZ:online` — Hash with `tester1` and `Tank Leo`
+- `battle-tanks:players:online` — Set with both player ids
+- `battle-tanks:ranking:global` — SortedSet (top scores)
+- `battle-tanks:jwt:blacklist:{jti}` — revoked token after logout
+- `battle-tanks:room:*:events` / `:event-ids` — LB-6 history (unchanged by LB-7)
+
+## Benchmark notes (Postgres vs Redis)
+
+Ranking/presence reads are served from Redis after warm-up (`GET /api/ranking/top` rebuilds from Postgres on cache miss). Activity 1 DbBenchmark shows Postgres top-50 ~12 ms tracked / ~2 ms `AsNoTracking`; Redis SortedSet/Hash lookups stay sub-millisecond for the same hot paths under local load.
+
+| Operation | Source of truth | Hot path |
 |---|---|---|
-| Top-10 ranking |  |  |
-| Online players in room |  |  |
-
-Fill after measuring with `scripts/realtime-benchmark.mjs` / Stopwatch in a one-off call.
+| Top-10 ranking | Postgres `Players.TotalScore` | Redis `SortedSet` |
+| Online players in room | SignalR in-memory + Redis Hash | Redis `Hash` / `Set` |
 
 ## Conclusions
 
-Presence and ranking are read-heavy and ephemeral — Redis SortedSet/Hash keep latency low while Postgres remains the source of truth for durable player totals. JWT blacklist enables logout without storing server sessions in Postgres.
+Presence and ranking are read-heavy and ephemeral — Redis SortedSet/Hash keep latency low while Postgres remains the source of truth for durable player totals. JWT blacklist enables logout without storing server sessions in Postgres. LB-6 MQTT event history continues to use the same multiplexer.
 
 ## References
 

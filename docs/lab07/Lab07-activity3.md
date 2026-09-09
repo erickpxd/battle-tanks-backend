@@ -69,10 +69,13 @@ When hardware/time allows, add a `postgres-replica` service with `primary_connin
 
 ## Evidence checklist
 
-1. Connection string pooling flags in config / logs  
-2. Diagram above (sharding + replication)  
-3. `Region` column + index in `\d GameSessions`  
-4. Load-test chart (connections vs p95 latency)
+1. Connection string pooling flags in config / logs (`Pooling=true` in `appsettings` / benchmark connection line)
+2. Diagram above (sharding + replication)
+3. `Region` column + index in `\d GameSessions` — see Activity 1 print:
+
+![GameSessions with Region and IX_GameSessions_Region](prints/01-indexes-players-gamesessions.png)
+
+4. Load-test chart (connections vs p95 latency) — optional; reuse `frontend/scripts/realtime-benchmark.mjs` when capturing Lab 06/07 latency evidence
 
 ## Conclusions
 

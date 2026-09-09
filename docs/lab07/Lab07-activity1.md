@@ -42,40 +42,39 @@ Emails are stored lowercase and room codes uppercase so queries can hit the uniq
 ```bash
 # from backend/
 docker compose up -d postgres
-dotnet ef database update --project src/BattleTanks.Infrastructure --startup-project src/BattleTanks.Api
+dotnet ef database update --context ApplicationDbContext --project src/BattleTanks.Infrastructure --startup-project src/BattleTanks.Api
 dotnet run --project tools/BattleTanks.DbBenchmark -- --scores 5000
 ```
 
-Expected console metrics:
+## Evidence — indexes (`psql \d`)
 
-- BulkInsert duration (ms)
-- Top-50 tracked `ToList` average (ms)
-- Top-50 `AsNoTracking` average (ms)
-- Speedup ratio
+Indexes created by migrations `AddPerformanceIndexes` and `AddRegionAndScalabilityIndexes`:
 
-## Screenshots / evidence checklist
+![Indexes on Players and GameSessions](prints/01-indexes-players-gamesessions.png)
 
-1. Migration `AddPerformanceIndexes` applied (`\d Players`, `\d GameSessions`, `\d Scores` in `psql`)
-2. Benchmark console output (BulkInsert + AsNoTracking speedup)
-3. Optional: `EXPLAIN ANALYZE` of top scores **before** vs **after** `IX_Scores_Points`
+![Indexes on Scores](prints/02-indexes-scores.png)
 
-Place images under `docs/lab07/prints/` and link them here.
+## Evidence — benchmark (`AsNoTracking` vs tracked + BulkInsert)
 
-### Results (fill after running)
+![DbBenchmark console output](prints/03-db-benchmark-asnotracking.png)
 
-| Metric | Before indexes | After indexes |
-|---|---|---|
-| Top-50 query (ms) |  |  |
-| AsNoTracking avg (ms) |  |  |
-| BulkInsert 5k (ms) |  |  |
+### Results (local run, 5000 scores)
+
+| Metric | Value |
+|---|---|
+| BulkInsert 5k | **252 ms** |
+| Top-50 `ToList` (tracked) avg | **12.57 ms** |
+| Top-50 `AsNoTracking` avg | **2.26 ms** |
+| Speedup AsNoTracking | **5.57×** |
 
 ```text
-(paste chart / ascii graph here)
+tracked     ████████████████  12.57 ms
+AsNoTracking ███               2.26 ms
 ```
 
 ## Conclusions
 
-Indexes + normalized keys make lobby join and ranking predictable under growth. `AsNoTracking` removes change-tracker cost on read-only paths. Pagination keeps `GET /api/room` bounded. Bulk insert is the practical way to seed ranking data for later Redis cache warm-up (Activity 2).
+Indexes + normalized keys make lobby join and ranking predictable under growth. `AsNoTracking` removes change-tracker cost on read-only paths (~5–7× in this seed). Pagination keeps `GET /api/room` bounded. Bulk insert is the practical way to seed ranking data for later Redis cache warm-up (Activity 2).
 
 ## References
 
