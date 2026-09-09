@@ -17,7 +17,7 @@ namespace BattleTanks.Infrastructure.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.10")
+                .HasAnnotation("ProductVersion", "8.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -33,10 +33,32 @@ namespace BattleTanks.Infrastructure.Persistence.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("Region")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("sa-east-1");
+
+                    b.Property<string>("RoomCode")
+                        .IsRequired()
+                        .HasMaxLength(9)
+                        .HasColumnType("character varying(9)");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Region")
+                        .HasDatabaseName("IX_GameSessions_Region");
+
+                    b.HasIndex("RoomCode")
+                        .IsUnique()
+                        .HasDatabaseName("IX_GameSessions_RoomCode");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_GameSessions_Status");
 
                     b.ToTable("GameSessions", (string)null);
                 });
@@ -63,10 +85,10 @@ namespace BattleTanks.Infrastructure.Persistence.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<string>("Password")
+                    b.Property<string>("PasswordHash")
                         .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasMaxLength(72)
+                        .HasColumnType("character varying(72)");
 
                     b.Property<int>("TotalScore")
                         .HasColumnType("integer");
@@ -76,7 +98,14 @@ namespace BattleTanks.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Email")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Players_Email");
+
                     b.HasIndex("GameSessionId");
+
+                    b.HasIndex("TotalScore")
+                        .HasDatabaseName("IX_Players_TotalScore");
 
                     b.ToTable("Players", (string)null);
                 });
@@ -98,16 +127,22 @@ namespace BattleTanks.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PlayerId");
+                    b.HasIndex("Points")
+                        .HasDatabaseName("IX_Scores_Points");
+
+                    b.HasIndex("PlayerId", "Date")
+                        .HasDatabaseName("IX_Scores_PlayerId_Date");
 
                     b.ToTable("Scores", (string)null);
                 });
 
             modelBuilder.Entity("BattleTanks.Domain.Entities.Player", b =>
                 {
-                    b.HasOne("BattleTanks.Domain.Entities.GameSession", null)
+                    b.HasOne("BattleTanks.Domain.Entities.GameSession", "GameSession")
                         .WithMany("ConnectedPlayers")
                         .HasForeignKey("GameSessionId");
+
+                    b.Navigation("GameSession");
                 });
 
             modelBuilder.Entity("BattleTanks.Domain.Entities.Score", b =>

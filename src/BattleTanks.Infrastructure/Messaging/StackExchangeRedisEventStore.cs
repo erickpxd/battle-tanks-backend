@@ -3,7 +3,7 @@ using StackExchange.Redis;
 
 namespace BattleTanks.Infrastructure.Messaging;
 
-public sealed class StackExchangeRedisEventStore : IRedisEventStore, IAsyncDisposable
+public sealed class StackExchangeRedisEventStore : IRedisEventStore
 {
     private const string AppendScript = """
         if redis.call('SADD', KEYS[2], ARGV[1]) == 0 then
@@ -16,15 +16,16 @@ public sealed class StackExchangeRedisEventStore : IRedisEventStore, IAsyncDispo
         return 1
         """;
 
+    private readonly IConnectionMultiplexer _connection;
     private readonly RedisHistoryOptions _options;
     private readonly ILogger<StackExchangeRedisEventStore> _logger;
-    private readonly SemaphoreSlim _connectionGate = new(1, 1);
-    private IConnectionMultiplexer? _connection;
 
     public StackExchangeRedisEventStore(
+        IConnectionMultiplexer connection,
         RedisHistoryOptions options,
         ILogger<StackExchangeRedisEventStore> logger)
     {
+        _connection = connection;
         _options = options;
         _logger = logger;
     }
@@ -38,7 +39,8 @@ public sealed class StackExchangeRedisEventStore : IRedisEventStore, IAsyncDispo
         TimeSpan timeToLive,
         CancellationToken cancellationToken = default)
     {
-        var database = await GetDatabaseAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var database = _connection.GetDatabase();
         var result = await database.ScriptEvaluateAsync(
             AppendScript,
             [eventListKey, deduplicationKey],
@@ -50,53 +52,14 @@ public sealed class StackExchangeRedisEventStore : IRedisEventStore, IAsyncDispo
         string eventListKey,
         CancellationToken cancellationToken = default)
     {
-        var database = await GetDatabaseAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var database = _connection.GetDatabase();
         var values = await database.ListRangeAsync(eventListKey, 0, _options.MaxEventsPerRoom - 1);
+        _logger.LogDebug("Redis read {Count} events from {Key}", values.Length, eventListKey);
         return values
             .Reverse()
             .Where(value => value.HasValue)
             .Select(value => value.ToString())
             .ToArray();
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_connection is not null)
-        {
-            await _connection.CloseAsync();
-            _connection.Dispose();
-        }
-
-        _connectionGate.Dispose();
-    }
-
-    private async Task<IDatabase> GetDatabaseAsync(CancellationToken cancellationToken)
-    {
-        if (_connection is { IsConnected: true })
-        {
-            return _connection.GetDatabase();
-        }
-
-        await _connectionGate.WaitAsync(cancellationToken);
-        try
-        {
-            if (_connection is not { IsConnected: true })
-            {
-                _connection?.Dispose();
-                var configuration = ConfigurationOptions.Parse(_options.ConnectionString);
-                configuration.AbortOnConnectFail = false;
-                configuration.ConnectTimeout = Math.Min(configuration.ConnectTimeout, 2_000);
-                _connection = await ConnectionMultiplexer.ConnectAsync(configuration);
-                // EVIDÊNCIA LAB 06: tirar screenshot deste log e das chaves no redis-cli.
-                _logger.LogInformation("Redis event history connected to {Endpoints}",
-                    string.Join(',', configuration.EndPoints));
-            }
-
-            return _connection.GetDatabase();
-        }
-        finally
-        {
-            _connectionGate.Release();
-        }
     }
 }

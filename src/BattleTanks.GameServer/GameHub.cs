@@ -19,21 +19,28 @@ public sealed class GameHub : Hub
     private static readonly HashSet<string> ValidDirections =
         new(StringComparer.OrdinalIgnoreCase) { "up", "down", "left", "right" };
 
+    // Matches frontend BattleMap: 20x15 cells with subdivision 3 → 60x45 expanded tiles.
+    private const int ExpandedMapColumns = 60;
+    private const int ExpandedMapRows = 45;
+
     private readonly IGameRoomState _gameRoomState;
     private readonly ISimulatedChatRepository _chatRepository;
     private readonly GameEventDispatcher _gameEventDispatcher;
     private readonly IGameSessionRepository _gameSessionRepository;
+    private readonly IOnlinePresenceService _onlinePresenceService;
 
     public GameHub(
         IGameRoomState gameRoomState,
         ISimulatedChatRepository chatRepository,
         GameEventDispatcher gameEventDispatcher,
-        IGameSessionRepository gameSessionRepository)
+        IGameSessionRepository gameSessionRepository,
+        IOnlinePresenceService onlinePresenceService)
     {
         _gameRoomState = gameRoomState;
         _chatRepository = chatRepository;
         _gameEventDispatcher = gameEventDispatcher;
         _gameSessionRepository = gameSessionRepository;
+        _onlinePresenceService = onlinePresenceService;
     }
 
     public async Task JoinRoom(string roomCode)
@@ -49,11 +56,24 @@ public sealed class GameHub : Hub
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, normalizedRoomCode);
+        Context.Items["PlayerId"] = playerId;
         var players = _gameRoomState.Join(
             normalizedRoomCode,
             Context.ConnectionId,
             playerId,
             playerName);
+
+        await _onlinePresenceService.PlayerJoinedAsync(
+            normalizedRoomCode,
+            playerId,
+            playerName,
+            Context.ConnectionId,
+            Context.ConnectionAborted);
+        await _onlinePresenceService.SetRoomStatusAsync(
+            normalizedRoomCode,
+            session.Status.ToString(),
+            players.Count,
+            Context.ConnectionAborted);
 
         await Clients.Caller.SendAsync("ReceiveLocalPlayerId", playerId);
         await Clients.Caller.SendAsync(
@@ -195,7 +215,8 @@ public sealed class GameHub : Hub
 
     public async Task<RealtimeAck> DestroyMapTile(MapTileChangeRequest request)
     {
-        if (request.Column is < 0 or >= 40 || request.Row is < 0 or >= 30)
+        if (request.Column is < 0 or >= ExpandedMapColumns ||
+            request.Row is < 0 or >= ExpandedMapRows)
         {
             throw new HubException("Map tile coordinates are outside the expanded game map.");
         }
@@ -228,6 +249,21 @@ public sealed class GameHub : Hub
         var departure = _gameRoomState.Leave(Context.ConnectionId);
         if (departure is not null)
         {
+            if (Context.Items["PlayerId"] is Guid playerId)
+            {
+                await _onlinePresenceService.PlayerLeftAsync(
+                    departure.RoomCode,
+                    playerId,
+                    Context.ConnectionId,
+                    CancellationToken.None);
+            }
+
+            await _onlinePresenceService.SetRoomStatusAsync(
+                departure.RoomCode,
+                "Waiting",
+                departure.RemainingPlayers.Count,
+                CancellationToken.None);
+
             await Clients.Group(departure.RoomCode)
                 .SendAsync("ReceivePlayersUpdated", departure.RemainingPlayers);
         }
