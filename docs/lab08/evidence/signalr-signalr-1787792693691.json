@@ -1,0 +1,21 @@
+{
+  "runId": "signalr-1787792693691",
+  "generatedAt": "2026-08-27T01:05:02.500Z",
+  "playerCount": 20,
+  "roomCount": 5,
+  "roomCapacity": 4,
+  "movesPerPlayer": 30,
+  "totalMovesAttempted": 600,
+  "totalAcks": 600,
+  "errorCount": 0,
+  "wallClockMs": 1308.37,
+  "latencyMs": {
+    "avg": 2.45,
+    "p50": 2.08,
+    "p95": 3.47,
+    "max": 12.23,
+    "min": 0.97
+  },
+  "congestionPeakMs": 12.23,
+  "sampleErrors": []
+}

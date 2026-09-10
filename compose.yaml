@@ -37,7 +37,8 @@ services:
     container_name: battle-tanks-influxdb
     restart: unless-stopped
     ports:
-      - "8086:8086"
+      # Host 8087 avoids clash with other local InfluxDB instances on 8086.
+      - "8087:8086"
     environment:
       - INFLUXDB_DB=k6
       - INFLUXDB_ADMIN_USER=admin
