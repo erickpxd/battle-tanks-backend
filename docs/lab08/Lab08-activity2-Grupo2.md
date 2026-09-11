@@ -34,7 +34,7 @@ docker run --rm --network host \
 
 **Scenario:** `shared-iterations` with **100 VUs / 100 iterations** (one registration each), unique emails.
 
-### Results (run 2026-08-27)
+### Results (run 2026-08-27 — reprint)
 
 | Metric | Value |
 |--------|------:|
@@ -43,10 +43,12 @@ docker run --rm --network host \
 | `auth_errors_4xx` | **0** |
 | `auth_errors_5xx` | **0** |
 | `auth_error_rate` | **0%** |
-| Duration avg | 4.05 s |
-| Duration p95 | 5.40 s |
-| Duration max | 5.72 s |
+| Duration avg | 2.67 s |
+| Duration p95 | 2.95 s |
+| Duration max | 3.20 s |
 | Checks | 100% |
+
+![k6 auth console](prints/01-auth-k6-console.png)
 
 **Notes:** Register uses bcrypt, so a simultaneous 100-VU burst spends seconds on CPU-bound hashing. Latency is elevated under concurrency but **all requests succeeded with no 4xx/5xx**. Metrics were exported to Influx (`http_req_duration`, `auth_register_*`, tags `lab=lb8-activity2`).
 
@@ -63,7 +65,7 @@ INFLUX_URL=http://localhost:8087 node signalr.test.js
 
 **Scenario:** register 20 players, place them in **5 rooms × 4** (API max players per room), connect to `/hubs/game`, invoke `MovePlayer` **30 times each** (600 moves). Round-trip latency measured around `invoke`.
 
-### Results (run 2026-08-27)
+### Results (run 2026-08-27 — reprint)
 
 | Metric | Value |
 |--------|------:|
@@ -71,10 +73,12 @@ INFLUX_URL=http://localhost:8087 node signalr.test.js
 | Rooms | 5 |
 | Move ACKs | **600 / 600** |
 | Errors | **0** |
-| Avg latency | **2.45 ms** |
-| p95 latency | **3.47 ms** |
-| Congestion peak (max) | **12.23 ms** |
-| Wall clock | 1.31 s |
+| Avg latency | **2.26 ms** |
+| p95 latency | **3.32 ms** |
+| Congestion peak (max) | **11.07 ms** |
+| Wall clock | 1.30 s |
+
+![SignalR console](prints/02-signalr-console.png)
 
 Influx measurement: `signalr_load` (fields `avg_ms`, `p95_ms`, `peak_ms`, `acks`, `errors`).
 
@@ -94,7 +98,7 @@ npx artillery run mqtt.test.yml
 
 **Scenario:** 50 frontend ACL clients subscribe to `battle-tanks/LOAD-TEST/events/#`. Backend credential publishes **10 chat** + **10 power-up** messages (QoS 1). Expect **50 × 20 = 1000** deliveries; assert **zero loss**.
 
-### Results (run 2026-08-27)
+### Results (run 2026-08-27 — reprint)
 
 | Metric | Value |
 |--------|------:|
@@ -106,6 +110,8 @@ npx artillery run mqtt.test.yml
 | Delivery rate | **1.0000** |
 | Clients complete | **50 / 50** |
 | Artillery VUs failed | 0 |
+
+![MQTT Artillery console](prints/03-mqtt-artillery-console.png)
 
 Influx measurement: `mqtt_load` (`subscribers`, `lost`, `delivery_rate`, `clients_ok`).
 
@@ -125,6 +131,8 @@ Service added in Activity #1 (`compose.yaml` → `influxdb:1.8`, `INFLUXDB_DB=k6
 | k6 auth | `--out influxdb=http://localhost:8087/k6` |
 | SignalR script | line protocol `POST /write?db=k6` → `signalr_load` |
 | MQTT processor | line protocol → `mqtt_load` |
+
+![InfluxDB query evidence](prints/04-influxdb-query.png)
 
 Verified measurements present after the runs:
 
