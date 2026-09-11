@@ -96,6 +96,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: battle-tanks-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+
 volumes:
   postgres_data:
   redis_data:
@@ -103,3 +118,4 @@ volumes:
   emqx_data:
   emqx_log:
   emqx_bootstrap:
+  grafana_data:
