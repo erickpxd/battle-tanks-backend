@@ -10,7 +10,7 @@ public interface IGameRoomState
         Guid playerId,
         string playerName);
 
-    RealtimePlayer Move(string connectionId, PlayerMoveRequest request, DateTime serverReceivedAt);
+    MoveResult Move(string connectionId, PlayerMoveRequest request, DateTime serverReceivedAt);
 
     RealtimePlayer Hit(string connectionId, PlayerHitRequest request, DateTime serverReceivedAt);
 
@@ -20,3 +20,15 @@ public interface IGameRoomState
 }
 
 public sealed record PlayerDeparture(string RoomCode, IReadOnlyList<RealtimePlayer> RemainingPlayers);
+
+/// <summary>
+/// Encapsulates the result of a <see cref="IGameRoomState.Move"/> call.
+/// <para>
+/// <see cref="WasThrottled"/> is set when the event arrived faster than the minimum
+/// inter-event interval (30 ms). The Hub uses this flag to skip the broadcast,
+/// but still returns a <see cref="RealtimeAck"/> to the caller so the client
+/// does not block waiting for a response.
+/// </para>
+/// </summary>
+public sealed record MoveResult(RealtimePlayer Player, bool WasThrottled);
+

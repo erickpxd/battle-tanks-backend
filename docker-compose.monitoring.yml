@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  prometheus:
+    image: prom/prometheus:v2.44.0
+    container_name: prometheus-redis
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus-config.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana-redis
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.52.0
+    container_name: redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://localhost:6379
+    # network_mode: host para conseguir acessar o Redis nativo rodando na sua máquina
+    network_mode: "host"

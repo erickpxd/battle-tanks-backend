@@ -48,7 +48,16 @@ public sealed class InMemoryGameRoomState : IGameRoomState
         }
     }
 
-    public RealtimePlayer Move(
+    /// <summary>
+    /// Updates the player's position. Returns a <see cref="MoveResult"/> indicating
+    /// whether the move was accepted or throttled.
+    /// <para>
+    /// Moves arriving within 30 ms of the last accepted move are throttled: the state
+    /// is not mutated and the caller is informed via <see cref="MoveResult.WasThrottled"/>.
+    /// This prevents lock contention and redundant SignalR broadcasts on the hot path.
+    /// </para>
+    /// </summary>
+    public MoveResult Move(
         string connectionId,
         PlayerMoveRequest request,
         DateTime serverReceivedAt)
@@ -62,6 +71,13 @@ public sealed class InMemoryGameRoomState : IGameRoomState
                 throw new InvalidOperationException("The connection has not joined a game room.");
             }
 
+            // Throttle: drop events arriving faster than 30 ms from the last accepted move.
+            const long MinIntervalMs = 30;
+            if (request.ClientSentAtUnixMs - entry.LastMovedAtUnixMs < MinIntervalMs)
+            {
+                return new MoveResult(entry.Player, WasThrottled: true);
+            }
+
             entry.Player = entry.Player with
             {
                 Position = new PlayerPosition(request.X, request.Y, request.Direction),
@@ -69,8 +85,9 @@ public sealed class InMemoryGameRoomState : IGameRoomState
                 ClientSentAtUnixMs = request.ClientSentAtUnixMs,
                 ServerReceivedAt = serverReceivedAt
             };
+            entry.LastMovedAtUnixMs = request.ClientSentAtUnixMs;
 
-            return entry.Player;
+            return new MoveResult(entry.Player, WasThrottled: false);
         }
     }
 
@@ -178,6 +195,12 @@ public sealed class InMemoryGameRoomState : IGameRoomState
     {
         public RealtimePlayer Player { get; set; } = player;
         public HashSet<string> ConnectionIds { get; } = [];
+
+        /// <summary>
+        /// Timestamp (Unix ms) of the last accepted <see cref="IGameRoomState.Move"/> call.
+        /// Used by the throttle logic to discard moves arriving faster than 30 ms.
+        /// </summary>
+        public long LastMovedAtUnixMs { get; set; }
     }
 
     private sealed record ConnectionMembership(string RoomCode, Guid PlayerId);
