@@ -49,3 +49,28 @@ curl -sG 'http://localhost:8087/query' --data-urlencode 'db=k6' --data-urlencode
 ```
 
 Host port **8087** avoids clashing with other local InfluxDB instances on 8086.
+
+---
+
+## LB-9 Activity #3 — alternative tools
+
+| File | Tool |
+|------|------|
+| `login.test.jmx` | JMeter — 1000 concurrent `POST /api/auth/login` |
+| `ranking-benchmark.scala` | Gatling — ranking + SignalR hub + MQTT config probes |
+| `run-ab-ranking.sh` | Apache Bench — `GET /api/ranking/top` |
+| `redis-latency-monitor.sh` | Redis MONITOR/latency → Influx; Grafana alert > 50ms |
+| `run-activity3.sh` | Docker helpers for JMeter + Gatling + ab + Redis |
+
+```bash
+docker compose up -d postgres redis emqx influxdb grafana
+# Grafana UI: http://localhost:3001 (admin/admin) — dashboard Lab 09 - Redis Latency
+ASPNETCORE_URLS=http://0.0.0.0:5049 dotnet run --project src/BattleTanks.Api --no-launch-profile
+
+cd benchmarks
+./run-activity3.sh
+# or individually:
+#   ./run-ab-ranking.sh
+#   ./redis-latency-monitor.sh
+```
+
