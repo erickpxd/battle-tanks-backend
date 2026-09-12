@@ -53,6 +53,10 @@ docker run --rm --network host \
 | Max | **~20.3 s** |
 | Throughput | **~14.5 req/s** |
 
+![JMeter console — 1000 logins](prints/01-jmeter-login-console.png)
+
+![JMeter HTML dashboard](prints/01b-jmeter-html-report.png)
+
 Login usa verificação de senha (bcrypt). Sob 1000 clientes concorrentes a CPU satura: a maioria ainda responde `200`, mas a cauda explode e ~2,5% cai em `500` (timeouts / pressão no host). Relatório HTML: `benchmarks/results/jmeter-login-report/` (gitignored).
 
 **Leitura:** JMeter é ótimo para cenários GUI/CI com assertions e relatório HTML; para auth com hashing, o bottleneck é CPU — alinhar ramp/limites com o que k6 já mostrou no Lab 08 (100 registers ~3 s médios).
@@ -93,6 +97,8 @@ docker run --rm --network host \
 | Mean req/s | 15.6 |
 | Assertions (p95 < 3 s, fail% < 15) | **passed** |
 
+![Gatling RankingBenchmark console](prints/02-gatling-ranking-console.png)
+
 Ranking via Redis SortedSet responde em milissegundos sob essa carga — contraste claro com o login CPU-bound do JMeter.
 
 ---
@@ -116,6 +122,8 @@ ab -n 2000 -c 50 'http://localhost:5049/api/ranking/top?take=10'
 | p50 / p95 / p99 | 7 / 13 / 28 ms |
 | Max | 29 ms |
 
+![Apache Bench ranking console](prints/03-ab-ranking-console.png)
+
 `ab` confirma o ranking como endpoint barato e cacheado — útil para smoke rápido sem JVM.
 
 ---
@@ -134,6 +142,12 @@ ab -n 2000 -c 50 'http://localhost:5049/api/ranking/top?take=10'
 | Alert | `Redis operation latency > 50ms` — `mean(latency_ms) > 50` for 1m |
 
 Amostras iniciais (RTT via `docker exec` no host) ficaram consistentemente **> 50 ms** e alimentaram o alerta. O script atual mede **dentro do container** (latência real do comando Redis, tipicamente < 5 ms em idle) e ainda grava SLOWLOG + MONITOR.
+
+![Redis MONITOR + latency samples](prints/04-redis-monitor-latency.png)
+
+![Grafana — Lab 09 Redis Latency dashboard](prints/05-grafana-redis-dashboard.png)
+
+![Grafana — alert rule provisioned (Lab09)](prints/06-grafana-redis-alert.png)
 
 UI: `http://localhost:3001/d/lab09-redis` (admin / admin).
 
