@@ -1,0 +1,31 @@
+# LB-8 Activity #2 — MQTT load test (Artillery)
+#
+# 50 devices subscribe to chat + power-up topics; mqtt-processor.cjs publishes
+# a known batch with the backend credential and asserts zero message loss.
+# Metrics are written to InfluxDB (compose service on host :8087, db=k6).
+#
+# The scenario uses Artillery's function hook so the MQTT fan-out (50 clients,
+# QoS 1, loss check, Influx write) runs inside mqtt-processor.cjs — more
+# reliable than artillery-engine-mqtt for delivery accounting.
+#
+# Run:
+#   cd benchmarks
+#   export MQTT_FRONTEND_PASSWORD=frontend-dev-pass
+#   export MQTT_BACKEND_PASSWORD=backend-dev-pass
+#   npm ci
+#   npx artillery run mqtt.test.yml
+
+config:
+  target: "http://localhost:5049"
+  phases:
+    - duration: 1
+      arrivalCount: 1
+      name: "MQTT fan-out validation (50 subscribers)"
+  processor: "./mqtt-processor.cjs"
+  variables:
+    roomId: "LOAD-TEST"
+
+scenarios:
+  - name: "50 subscribers — chat + power-up without loss"
+    flow:
+      - function: "runMqttLoadTest"

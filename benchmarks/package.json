@@ -1,0 +1,21 @@
+{
+  "name": "battle-tanks-benchmarks",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test:auth": "k6 run --out influxdb=http://localhost:8087/k6 auth.test.js",
+    "test:signalr": "node signalr.test.js",
+    "test:mqtt": "artillery run mqtt.test.yml",
+    "test:activity2": "npm run test:auth && npm run test:signalr && npm run test:mqtt"
+  },
+  "dependencies": {
+    "@microsoft/signalr": "^8.0.7",
+    "mqtt": "^5.10.4"
+  },
+  "devDependencies": {
+    "artillery": "2.0.21"
+  }
+}

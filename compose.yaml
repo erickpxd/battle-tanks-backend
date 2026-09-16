@@ -12,11 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,6 +31,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  influxdb:
+    image: influxdb:1.8
+    container_name: battle-tanks-influxdb
+    restart: unless-stopped
+    ports:
+      # Host 8087 avoids clash with other local InfluxDB instances on 8086.
+      - "8087:8086"
+    environment:
+      - INFLUXDB_DB=k6
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=admin
+    volumes:
+      - influxdb_data:/var/lib/influxdb
 
   emqx-bootstrap:
     image: alpine:3.20
@@ -87,9 +97,26 @@ services:
       timeout: 5s
       retries: 10
 
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: battle-tanks-grafana
+    restart: unless-stopped
+    ports:
+      # Host 3001 avoids clash with other local Grafana instances on 3000.
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+
 volumes:
   postgres_data:
   redis_data:
+  influxdb_data:
   emqx_data:
   emqx_log:
   emqx_bootstrap:
+  grafana_data:

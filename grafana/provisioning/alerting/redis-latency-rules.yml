@@ -1,0 +1,47 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: lab09-redis-latency
+    folder: Lab09
+    interval: 30s
+    rules:
+      - uid: lab09-redis-over-50ms
+        title: Redis operation latency > 50ms
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: InfluxDB
+            model:
+              rawQuery: true
+              query: SELECT mean("latency_ms") FROM "redis_op_latency" WHERE $timeFilter GROUP BY time(10s) fill(none)
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [50]
+                    type: gt
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Redis command latency exceeded 50ms (Lab 09 Activity 3)
+          description: mean(latency_ms) from redis_op_latency is above the 50ms SLO.
+        labels:
+          severity: warning
+          lab: lb9-activity3

@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
+using StackExchange.Redis;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -36,8 +37,14 @@ public static class DependencyInjection
             options.UseNpgsql(readConnectionString)
                 .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
 
-        // Repositories
-        services.AddScoped<IPlayerRepository, PlayerRepository>();
+        // Repositories.
+        // PlayerService (Infrastructure/Caching) is a Redis-backed Decorator over PlayerRepository.
+        // Use cases depend only on IPlayerRepository and receive the decorator transparently via DI.
+        services.AddScoped<PlayerRepository>();
+        services.AddScoped<IPlayerRepository>(sp =>
+            new PlayerService(
+                sp.GetRequiredService<PlayerRepository>(),
+                sp.GetRequiredService<IConnectionMultiplexer>()));
         services.AddScoped<IGameSessionRepository, GameSessionRepository>();
         services.AddScoped<IScoreRepository, ScoreRepository>();
         services.AddSingleton<ISimulatedChatRepository, SimulatedChatRepository>();

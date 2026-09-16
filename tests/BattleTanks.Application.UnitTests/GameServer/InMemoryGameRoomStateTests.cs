@@ -25,12 +25,40 @@ public class InMemoryGameRoomStateTests
         state.Join("ROOM-ONE", "connection-1", playerId, "Ana");
         var request = new PlayerMoveRequest(8, 6, "right", "event-1", 1000);
 
-        var player = state.Move("connection-1", request, DateTime.UnixEpoch);
+        var result = state.Move("connection-1", request, DateTime.UnixEpoch);
 
-        player.Id.Should().Be(playerId);
-        player.Position.Should().Be(new PlayerPosition(8, 6, "right"));
-        player.EventId.Should().Be("event-1");
-        player.ServerReceivedAt.Should().Be(DateTime.UnixEpoch);
+        result.WasThrottled.Should().BeFalse();
+        result.Player.Id.Should().Be(playerId);
+        result.Player.Position.Should().Be(new PlayerPosition(8, 6, "right"));
+        result.Player.EventId.Should().Be("event-1");
+        result.Player.ServerReceivedAt.Should().Be(DateTime.UnixEpoch);
+    }
+
+    [Fact]
+    public void Move_ShouldThrottleEventsArrivingFasterThan30Ms()
+    {
+        var state = new InMemoryGameRoomState();
+        state.Join("ROOM-ONE", "connection-1", Guid.NewGuid(), "Ana");
+
+        // First move at t=1000ms — should be accepted.
+        var first = state.Move("connection-1",
+            new PlayerMoveRequest(1, 1, "right", "event-1", ClientSentAtUnixMs: 1000),
+            DateTime.UnixEpoch);
+
+        // Second move at t=1010ms (delta=10ms < 30ms) — should be throttled.
+        var throttled = state.Move("connection-1",
+            new PlayerMoveRequest(2, 2, "down", "event-2", ClientSentAtUnixMs: 1010),
+            DateTime.UnixEpoch);
+
+        // Third move at t=1040ms (delta=40ms >= 30ms) — should be accepted.
+        var accepted = state.Move("connection-1",
+            new PlayerMoveRequest(3, 3, "left", "event-3", ClientSentAtUnixMs: 1040),
+            DateTime.UnixEpoch);
+
+        first.WasThrottled.Should().BeFalse();
+        throttled.WasThrottled.Should().BeTrue();
+        accepted.WasThrottled.Should().BeFalse();
+        accepted.Player.Position.Should().Be(new PlayerPosition(3, 3, "left"));
     }
 
     [Fact]

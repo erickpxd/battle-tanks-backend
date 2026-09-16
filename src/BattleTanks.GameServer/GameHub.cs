@@ -93,17 +93,23 @@ public sealed class GameHub : Hub
         var roomCode = GetJoinedRoomCode();
         var serverReceivedAt = DateTime.UtcNow;
 
-        RealtimePlayer player;
+        MoveResult result;
         try
         {
-            player = _gameRoomState.Move(Context.ConnectionId, request, serverReceivedAt);
+            result = _gameRoomState.Move(Context.ConnectionId, request, serverReceivedAt);
         }
         catch (InvalidOperationException exception)
         {
             throw new HubException(exception.Message);
         }
 
-        await Clients.OthersInGroup(roomCode).SendAsync("ReceivePlayerMove", player);
+        // Throttled moves still receive an ACK so the client does not block,
+        // but we skip the group broadcast to avoid redundant state pushes.
+        if (!result.WasThrottled)
+        {
+            await Clients.OthersInGroup(roomCode).SendAsync("ReceivePlayerMove", result.Player);
+        }
+
         return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
     }
 
