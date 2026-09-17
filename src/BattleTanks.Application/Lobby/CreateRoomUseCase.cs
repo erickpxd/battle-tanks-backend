@@ -7,6 +7,11 @@ namespace BattleTanks.Application.Lobby;
 
 public class CreateRoomUseCase
 {
+    private static readonly HashSet<string> SupportedMaps =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "battleground", "fortress", "swamp", "ruins"
+        };
     private readonly IGameSessionRepository _sessionRepository;
     private readonly IPlayerRepository _playerRepository;
 
@@ -29,12 +34,19 @@ public class CreateRoomUseCase
         var creator = await _playerRepository.GetByIdAsync(creatorPlayerId, cancellationToken)
             ?? throw new InvalidOperationException("Player not found.");
 
+        var mapSelected = request.MapSelected?.Trim().ToLowerInvariant() ?? string.Empty;
+        mapSelected = mapSelected == "default" ? "battleground" : mapSelected;
+        if (!SupportedMaps.Contains(mapSelected))
+        {
+            throw new ArgumentException("Unsupported map selection.", nameof(request));
+        }
+
         var roomCode = await GenerateUniqueRoomCodeAsync(cancellationToken);
 
         var session = new GameSession
         {
             RoomCode    = roomCode,
-            MapSelected = request.MapSelected,
+            MapSelected = mapSelected,
             Region      = string.IsNullOrWhiteSpace(request.Region) ? "sa-east-1" : request.Region.Trim().ToLowerInvariant(),
             Status      = GameSessionStatus.Waiting
         };
