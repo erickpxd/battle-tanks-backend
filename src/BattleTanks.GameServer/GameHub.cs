@@ -84,6 +84,9 @@ public sealed class GameHub : Hub
             await _gameEventDispatcher.GetRecentAsync(
                 normalizedRoomCode,
                 Context.ConnectionAborted));
+        await Clients.Caller.SendAsync(
+            "ReceivePowerUpsUpdated",
+            _gameRoomState.GetPowerUps(normalizedRoomCode, DateTime.UtcNow));
         await Clients.Group(normalizedRoomCode).SendAsync("ReceivePlayersUpdated", players);
     }
 
@@ -110,6 +113,41 @@ public sealed class GameHub : Hub
             await Clients.OthersInGroup(roomCode).SendAsync("ReceivePlayerMove", result.Player);
         }
 
+        var powerUpUpdate = _gameRoomState.UpdatePowerUps(roomCode, serverReceivedAt);
+        if (powerUpUpdate.Changed)
+        {
+            await Clients.Group(roomCode)
+                .SendAsync("ReceivePowerUpsUpdated", powerUpUpdate.ActivePowerUps);
+        }
+
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
+    }
+
+    public async Task<RealtimeAck> CollectPowerUp(CollectPowerUpRequest request)
+    {
+        if (request.PowerUpId == Guid.Empty || string.IsNullOrWhiteSpace(request.EventId))
+        {
+            throw new HubException("A valid power-up and event identifier are required.");
+        }
+
+        var roomCode = GetJoinedRoomCode();
+        var serverReceivedAt = DateTime.UtcNow;
+        PowerUpCollectionResult result;
+        try
+        {
+            result = _gameRoomState.CollectPowerUp(
+                Context.ConnectionId,
+                request,
+                serverReceivedAt);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new HubException(exception.Message);
+        }
+
+        await Task.WhenAll(
+            Clients.Group(roomCode).SendAsync("ReceivePlayerPowerUp", result.Player),
+            Clients.Group(roomCode).SendAsync("ReceivePowerUpsUpdated", result.ActivePowerUps));
         return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
     }
 

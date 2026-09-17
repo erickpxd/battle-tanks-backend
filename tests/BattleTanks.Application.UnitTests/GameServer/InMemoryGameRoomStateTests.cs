@@ -123,4 +123,75 @@ public class InMemoryGameRoomStateTests
 
         duplicateResult.Health.Should().Be(75);
     }
+
+    [Fact]
+    public void PowerUp_ShouldSpawnAtOneRandomPredefinedPointAndBeCollectedOnlyOnce()
+    {
+        var state = new InMemoryGameRoomState();
+        var playerId = Guid.NewGuid();
+        state.Join("ROOM-ONE", "connection-1", playerId, "Ana");
+        var now = DateTime.UtcNow.AddMinutes(1);
+
+        var update = state.UpdatePowerUps("ROOM-ONE", now);
+
+        update.Changed.Should().BeTrue();
+        var powerUp = update.ActivePowerUps.Should().ContainSingle().Subject;
+        PowerUpTypes.All.Should().Contain(powerUp.Type);
+
+        state.Move(
+            "connection-1",
+            new PlayerMoveRequest(powerUp.X, powerUp.Y, "down", "move-power-up", 1000),
+            now);
+        var result = state.CollectPowerUp(
+            "connection-1",
+            new CollectPowerUpRequest(powerUp.Id, "collect-1", 1001),
+            now);
+
+        result.ActivePowerUps.Should().BeEmpty();
+        result.Player.Id.Should().Be(playerId);
+        Action duplicateCollection = () => state.CollectPowerUp(
+            "connection-1",
+            new CollectPowerUpRequest(powerUp.Id, "collect-2", 1002),
+            now);
+        duplicateCollection.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Shield_ShouldAbsorbDamageBeforeHealth()
+    {
+        var state = new InMemoryGameRoomState();
+        var shooterId = Guid.NewGuid();
+        var targetId = Guid.NewGuid();
+        state.Join("ROOM-SHIELD", "shooter", shooterId, "Ana");
+        state.Join("ROOM-SHIELD", "target", targetId, "Bia");
+        var now = DateTime.UtcNow.AddMinutes(1);
+
+        // Spawn/collect until the deterministic room lifecycle offers a shield.
+        RealtimePlayer? shielded = null;
+        for (var attempt = 0; attempt < 100 && shielded is null; attempt++)
+        {
+            var powerUp = state.UpdatePowerUps("ROOM-SHIELD", now.AddMinutes(attempt))
+                .ActivePowerUps.Single();
+            state.Move(
+                "target",
+                new PlayerMoveRequest(powerUp.X, powerUp.Y, "down", $"move-{attempt}", 1000 + attempt * 100),
+                now.AddMinutes(attempt));
+            var collected = state.CollectPowerUp(
+                "target",
+                new CollectPowerUpRequest(powerUp.Id, $"collect-{attempt}", 1001 + attempt * 100),
+                now.AddMinutes(attempt));
+            if (powerUp.Type == PowerUpTypes.Shield)
+            {
+                shielded = collected.Player;
+            }
+        }
+
+        shielded.Should().NotBeNull();
+        var hit = state.Hit(
+            "shooter",
+            new PlayerHitRequest(targetId, 25, "shield-hit", 20000),
+            shielded!.ShieldExpiresAt!.Value.AddSeconds(-1));
+        hit.Health.Should().Be(100);
+        hit.ShieldHealth.Should().Be(25);
+    }
 }
