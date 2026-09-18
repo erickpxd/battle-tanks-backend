@@ -38,6 +38,7 @@ public sealed class InMemoryGameRoomState : IGameRoomState
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RoomPowerUpState> _powerUps =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _finishedRooms = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<RealtimePlayer> Join(
         string roomCode,
@@ -178,6 +179,71 @@ public sealed class InMemoryGameRoomState : IGameRoomState
         }
     }
 
+    public ReadyResult SetReady(string connectionId, bool ready)
+    {
+        lock (_sync)
+        {
+            var (players, entry) = GetConnectedPlayer(connectionId);
+            if (entry.Player.Status == "destroyed")
+            {
+                throw new InvalidOperationException("A destroyed player cannot change readiness.");
+            }
+            entry.Player = entry.Player with { Ready = ready };
+            var snapshot = Snapshot(players);
+            return new ReadyResult(
+                snapshot,
+                snapshot.Count >= 2 && snapshot.All(player => player.Ready));
+        }
+    }
+
+    public RealtimePlayer Surrender(
+        string connectionId,
+        DateTime serverReceivedAt,
+        string eventId)
+    {
+        lock (_sync)
+        {
+            var (_, entry) = GetConnectedPlayer(connectionId);
+            entry.Player = entry.Player with
+            {
+                Health = 0,
+                Status = "destroyed",
+                EventId = eventId,
+                ServerReceivedAt = serverReceivedAt
+            };
+            return entry.Player;
+        }
+    }
+
+    public GameOutcome? TryFinishGame(
+        string roomCode,
+        Guid defeatedPlayerId,
+        string triggerEventId)
+    {
+        lock (_sync)
+        {
+            if (_finishedRooms.Contains(roomCode) ||
+                !_rooms.TryGetValue(roomCode, out var players) ||
+                players.Count < 2 ||
+                !players.TryGetValue(defeatedPlayerId, out var defeated))
+            {
+                return null;
+            }
+
+            var activePlayers = players.Values
+                .Select(entry => entry.Player)
+                .Where(player => player.Status == "active")
+                .ToArray();
+            if (activePlayers.Length > 1)
+            {
+                return null;
+            }
+
+            _finishedRooms.Add(roomCode);
+            return new GameOutcome(defeated.Player, activePlayers.SingleOrDefault(), triggerEventId);
+        }
+    }
+
     public PowerUpCollectionResult CollectPowerUp(
         string connectionId,
         CollectPowerUpRequest request,
@@ -298,6 +364,7 @@ public sealed class InMemoryGameRoomState : IGameRoomState
             _rooms.Remove(membership.RoomCode);
             _processedHitEventIds.Remove(membership.RoomCode);
             _powerUps.Remove(membership.RoomCode);
+            _finishedRooms.Remove(membership.RoomCode);
         }
 
         return new PlayerDeparture(membership.RoomCode, snapshot);
@@ -358,6 +425,18 @@ public sealed class InMemoryGameRoomState : IGameRoomState
             DoubleDamageExpiresAt = player.DoubleDamageExpiresAt > now ? player.DoubleDamageExpiresAt : null,
             MachineGunExpiresAt = player.MachineGunExpiresAt > now ? player.MachineGunExpiresAt : null
         };
+    }
+
+    private (Dictionary<Guid, PlayerEntry> Players, PlayerEntry Entry) GetConnectedPlayer(
+        string connectionId)
+    {
+        if (!_connections.TryGetValue(connectionId, out var membership) ||
+            !_rooms.TryGetValue(membership.RoomCode, out var players) ||
+            !players.TryGetValue(membership.PlayerId, out var entry))
+        {
+            throw new InvalidOperationException("The connection has not joined a game room.");
+        }
+        return (players, entry);
     }
 
     private sealed class PlayerEntry(RealtimePlayer player)

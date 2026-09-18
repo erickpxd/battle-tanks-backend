@@ -194,4 +194,42 @@ public class InMemoryGameRoomStateTests
         hit.Health.Should().Be(100);
         hit.ShieldHealth.Should().Be(25);
     }
+
+    [Fact]
+    public void SetReady_ShouldStartOnlyWhenAtLeastTwoPlayersAreReady()
+    {
+        var state = new InMemoryGameRoomState();
+        state.Join("READY", "connection-1", Guid.NewGuid(), "Ana");
+        state.SetReady("connection-1", true).AllReady.Should().BeFalse();
+        state.Join("READY", "connection-2", Guid.NewGuid(), "Bia");
+
+        state.SetReady("connection-1", true).AllReady.Should().BeFalse();
+        var result = state.SetReady("connection-2", true);
+
+        result.AllReady.Should().BeTrue();
+        result.Players.Should().OnlyContain(player => player.Ready);
+    }
+
+    [Fact]
+    public void Surrender_ShouldDestroyPlayerAndFinishTheGameOnce()
+    {
+        var state = new InMemoryGameRoomState();
+        var defeatedId = Guid.NewGuid();
+        var winnerId = Guid.NewGuid();
+        state.Join("SURRENDER", "connection-1", defeatedId, "Ana");
+        state.Join("SURRENDER", "connection-2", winnerId, "Bia");
+
+        var defeated = state.Surrender(
+            "connection-1",
+            DateTime.UnixEpoch,
+            "surrender-1");
+        var outcome = state.TryFinishGame("SURRENDER", defeatedId, "surrender-1");
+
+        defeated.Status.Should().Be("destroyed");
+        defeated.Health.Should().Be(0);
+        outcome.Should().NotBeNull();
+        outcome!.WinnerPlayer!.Id.Should().Be(winnerId);
+        outcome.DefeatedPlayer.Name.Should().Be("Ana");
+        state.TryFinishGame("SURRENDER", defeatedId, "duplicate").Should().BeNull();
+    }
 }

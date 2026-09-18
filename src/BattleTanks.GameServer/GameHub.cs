@@ -5,6 +5,7 @@ using BattleTanks.Application.GameEvents;
 using BattleTanks.Contracts.GameEvents;
 using BattleTanks.Contracts.Realtime;
 using BattleTanks.Contracts.Responses.Chat;
+using BattleTanks.Domain.Entities;
 using BattleTanks.GameServer.State;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -88,6 +89,99 @@ public sealed class GameHub : Hub
             "ReceivePowerUpsUpdated",
             _gameRoomState.GetPowerUps(normalizedRoomCode, DateTime.UtcNow));
         await Clients.Group(normalizedRoomCode).SendAsync("ReceivePlayersUpdated", players);
+        if (session.Status == GameSessionStatus.InGame)
+        {
+            await Clients.Caller.SendAsync("ReceiveGameStarted");
+        }
+    }
+
+    public async Task<RealtimeAck> SetPlayerReady(PlayerReadyRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.EventId))
+        {
+            throw new HubException("An event identifier is required.");
+        }
+        var roomCode = GetJoinedRoomCode();
+        ReadyResult result;
+        try
+        {
+            result = _gameRoomState.SetReady(Context.ConnectionId, request.Ready);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new HubException(exception.Message);
+        }
+
+        await Clients.Group(roomCode).SendAsync("ReceivePlayersUpdated", result.Players);
+        if (result.AllReady)
+        {
+            var session = await _gameSessionRepository.GetByRoomCodeAsync(
+                roomCode,
+                Context.ConnectionAborted);
+            if (session?.Status == GameSessionStatus.Waiting)
+            {
+                session.Status = GameSessionStatus.InGame;
+                await _gameSessionRepository.UpdateAsync(session, Context.ConnectionAborted);
+                await _gameSessionRepository.SaveChangesAsync(Context.ConnectionAborted);
+                await _onlinePresenceService.SetRoomStatusAsync(
+                    roomCode,
+                    GameSessionStatus.InGame.ToString(),
+                    result.Players.Count,
+                    Context.ConnectionAborted);
+                await Clients.Group(roomCode).SendAsync("ReceiveGameStarted");
+            }
+        }
+
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, DateTime.UtcNow);
+    }
+
+    public async Task<RealtimeAck> FireShot(FireShotRequest request)
+    {
+        if (!ValidDirections.Contains(request.Direction) || string.IsNullOrWhiteSpace(request.EventId))
+        {
+            throw new HubException("A valid shot direction and event identifier are required.");
+        }
+        var roomCode = GetJoinedRoomCode();
+        var (playerId, _) = ReadPlayerIdentity();
+        var player = _gameRoomState.GetPlayers(roomCode).SingleOrDefault(item => item.Id == playerId);
+        if (player is null || player.Status != "active")
+        {
+            throw new HubException("Only an active player can fire.");
+        }
+        var serverReceivedAt = DateTime.UtcNow;
+        var shot = new RealtimeShot(
+            playerId,
+            player.Position with { Direction = request.Direction },
+            request.EventId,
+            request.ClientSentAtUnixMs,
+            serverReceivedAt);
+        await Clients.OthersInGroup(roomCode).SendAsync("ReceivePlayerShot", shot);
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
+    }
+
+    public async Task<RealtimeAck> Surrender(SurrenderRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.EventId))
+        {
+            throw new HubException("An event identifier is required.");
+        }
+        var roomCode = GetJoinedRoomCode();
+        var serverReceivedAt = DateTime.UtcNow;
+        RealtimePlayer defeated;
+        try
+        {
+            defeated = _gameRoomState.Surrender(
+                Context.ConnectionId,
+                serverReceivedAt,
+                request.EventId);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new HubException(exception.Message);
+        }
+        await Clients.Group(roomCode).SendAsync("ReceivePlayerHit", defeated);
+        await FinishGameAsync(roomCode, defeated.Id, request.EventId, serverReceivedAt);
+        return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
     }
 
     public async Task<RealtimeAck> MovePlayer(PlayerMoveRequest request)
@@ -234,24 +328,9 @@ public sealed class GameHub : Hub
                 GameEventQos.AtLeastOnce,
                 CancellationToken.None));
 
-        var players = _gameRoomState.GetPlayers(roomCode);
-        var activePlayers = players.Where(candidate => candidate.Status == "active").ToArray();
-        if (player.Status == "destroyed" && players.Count > 1 && activePlayers.Length <= 1)
+        if (player.Status == "destroyed")
         {
-            var endedEvent = GameEventEnvelope.Create(
-                Guid.NewGuid().ToString("N"),
-                GameEventTypes.GameEnded,
-                roomCode,
-                playerId,
-                new DateTimeOffset(serverReceivedAt).ToUnixTimeMilliseconds(),
-                new DateTimeOffset(serverReceivedAt),
-                new GameEndedEventData(player.Id, activePlayers.SingleOrDefault()?.Id, request.EventId));
-
-            // QoS 1: game over must be delivered; eventId makes duplicate delivery harmless.
-            await _gameEventDispatcher.DispatchAsync(
-                endedEvent,
-                GameEventQos.AtLeastOnce,
-                CancellationToken.None);
+            await FinishGameAsync(roomCode, player.Id, request.EventId, serverReceivedAt);
         }
 
         return new RealtimeAck(request.EventId, request.ClientSentAtUnixMs, serverReceivedAt);
@@ -302,9 +381,12 @@ public sealed class GameHub : Hub
                     CancellationToken.None);
             }
 
+            var session = await _gameSessionRepository.GetByRoomCodeAsync(
+                departure.RoomCode,
+                CancellationToken.None);
             await _onlinePresenceService.SetRoomStatusAsync(
                 departure.RoomCode,
-                "Waiting",
+                session?.Status.ToString() ?? GameSessionStatus.Waiting.ToString(),
                 departure.RemainingPlayers.Count,
                 CancellationToken.None);
 
@@ -324,6 +406,49 @@ public sealed class GameHub : Hub
         }
 
         return roomCode;
+    }
+
+    private async Task FinishGameAsync(
+        string roomCode,
+        Guid defeatedPlayerId,
+        string triggerEventId,
+        DateTime serverReceivedAt)
+    {
+        var outcome = _gameRoomState.TryFinishGame(roomCode, defeatedPlayerId, triggerEventId);
+        if (outcome is null)
+        {
+            return;
+        }
+        var endedEvent = GameEventEnvelope.Create(
+            Guid.NewGuid().ToString("N"),
+            GameEventTypes.GameEnded,
+            roomCode,
+            outcome.WinnerPlayer?.Id,
+            new DateTimeOffset(serverReceivedAt).ToUnixTimeMilliseconds(),
+            new DateTimeOffset(serverReceivedAt),
+            new GameEndedEventData(
+                outcome.DefeatedPlayer.Id,
+                outcome.WinnerPlayer?.Id,
+                triggerEventId,
+                outcome.DefeatedPlayer.Name,
+                outcome.WinnerPlayer?.Name));
+
+        var session = await _gameSessionRepository.GetByRoomCodeAsync(
+            roomCode,
+            CancellationToken.None);
+        if (session is not null)
+        {
+            session.Status = GameSessionStatus.Finished;
+            await _gameSessionRepository.UpdateAsync(session, CancellationToken.None);
+            await _gameSessionRepository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await Task.WhenAll(
+            Clients.Group(roomCode).SendAsync("ReceiveGameEnded", endedEvent),
+            _gameEventDispatcher.DispatchAsync(
+                endedEvent,
+                GameEventQos.AtLeastOnce,
+                CancellationToken.None));
     }
 
     private string NormalizeRoomCode(string roomCode)
