@@ -14,6 +14,17 @@ public interface IGameRoomState
 
     RealtimePlayer Hit(string connectionId, PlayerHitRequest request, DateTime serverReceivedAt);
 
+    PowerUpCollectionResult CollectPowerUp(
+        string connectionId,
+        CollectPowerUpRequest request,
+        DateTime serverReceivedAt);
+
+    PowerUpUpdate UpdatePowerUps(string roomCode, DateTime now);
+
+    IReadOnlyList<RealtimePowerUp> GetPowerUps(string roomCode, DateTime now);
+
+    IReadOnlyList<RoomPowerUpUpdate> UpdateAllPowerUps(DateTime now);
+
     IReadOnlyList<RealtimePlayer> GetPlayers(string roomCode);
 
     PlayerDeparture? Leave(string connectionId);
@@ -32,3 +43,10 @@ public sealed record PlayerDeparture(string RoomCode, IReadOnlyList<RealtimePlay
 /// </summary>
 public sealed record MoveResult(RealtimePlayer Player, bool WasThrottled);
 
+public sealed record PowerUpUpdate(
+    IReadOnlyList<RealtimePowerUp> ActivePowerUps,
+    bool Changed);
+
+public sealed record RoomPowerUpUpdate(
+    string RoomCode,
+    IReadOnlyList<RealtimePowerUp> ActivePowerUps);

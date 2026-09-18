@@ -9,6 +9,7 @@ public static class DependencyInjection
     {
         services.AddSignalR();
         services.AddSingleton<IGameRoomState, InMemoryGameRoomState>();
+        services.AddHostedService<PowerUpSpawnerService>();
         return services;
     }
 }
