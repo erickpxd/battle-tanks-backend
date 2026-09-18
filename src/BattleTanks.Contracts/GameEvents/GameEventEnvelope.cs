@@ -48,7 +48,9 @@ public sealed record GameEndedEventData(
     Guid? WinnerPlayerId,
     string TriggerEventId,
     string? DefeatedPlayerName = null,
-    string? WinnerPlayerName = null);
+    string? WinnerPlayerName = null,
+    int WinnerPointsAwarded = 0,
+    int? WinnerTotalScore = null);
 
 public static class GameEventJson
 {

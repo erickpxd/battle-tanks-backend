@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BattleTanks.Application.Abstractions;
 using BattleTanks.Application.Chat;
 using BattleTanks.Application.GameEvents;
+using BattleTanks.Application.Scoring;
 using BattleTanks.Contracts.GameEvents;
 using BattleTanks.Contracts.Realtime;
 using BattleTanks.Contracts.Responses.Chat;
@@ -29,19 +30,22 @@ public sealed class GameHub : Hub
     private readonly GameEventDispatcher _gameEventDispatcher;
     private readonly IGameSessionRepository _gameSessionRepository;
     private readonly IOnlinePresenceService _onlinePresenceService;
+    private readonly RecordMatchResultUseCase _recordMatchResult;
 
     public GameHub(
         IGameRoomState gameRoomState,
         ISimulatedChatRepository chatRepository,
         GameEventDispatcher gameEventDispatcher,
         IGameSessionRepository gameSessionRepository,
-        IOnlinePresenceService onlinePresenceService)
+        IOnlinePresenceService onlinePresenceService,
+        RecordMatchResultUseCase recordMatchResult)
     {
         _gameRoomState = gameRoomState;
         _chatRepository = chatRepository;
         _gameEventDispatcher = gameEventDispatcher;
         _gameSessionRepository = gameSessionRepository;
         _onlinePresenceService = onlinePresenceService;
+        _recordMatchResult = recordMatchResult;
     }
 
     public async Task JoinRoom(string roomCode)
@@ -419,6 +423,17 @@ public sealed class GameHub : Hub
         {
             return;
         }
+        var participantIds = _gameRoomState.GetPlayers(roomCode)
+            .Select(player => player.Id)
+            .ToArray();
+        var recordedScores = await _recordMatchResult.ExecuteAsync(
+            roomCode,
+            participantIds,
+            outcome.WinnerPlayer?.Id,
+            serverReceivedAt,
+            CancellationToken.None);
+        var winnerScore = recordedScores.SingleOrDefault(
+            score => score.PlayerId == outcome.WinnerPlayer?.Id);
         var endedEvent = GameEventEnvelope.Create(
             Guid.NewGuid().ToString("N"),
             GameEventTypes.GameEnded,
@@ -431,17 +446,9 @@ public sealed class GameHub : Hub
                 outcome.WinnerPlayer?.Id,
                 triggerEventId,
                 outcome.DefeatedPlayer.Name,
-                outcome.WinnerPlayer?.Name));
-
-        var session = await _gameSessionRepository.GetByRoomCodeAsync(
-            roomCode,
-            CancellationToken.None);
-        if (session is not null)
-        {
-            session.Status = GameSessionStatus.Finished;
-            await _gameSessionRepository.UpdateAsync(session, CancellationToken.None);
-            await _gameSessionRepository.SaveChangesAsync(CancellationToken.None);
-        }
+                outcome.WinnerPlayer?.Name,
+                winnerScore?.PointsAwarded ?? 0,
+                winnerScore?.TotalScore));
 
         await Task.WhenAll(
             Clients.Group(roomCode).SendAsync("ReceiveGameEnded", endedEvent),
