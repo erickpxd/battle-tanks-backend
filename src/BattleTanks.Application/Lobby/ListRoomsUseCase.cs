@@ -1,4 +1,5 @@
 using BattleTanks.Application.Abstractions;
+using BattleTanks.Contracts.Responses.Common;
 using BattleTanks.Contracts.Responses.Room;
 using BattleTanks.Domain.Entities;
 
@@ -14,7 +15,7 @@ public class ListRoomsUseCase
     }
 
     /// <summary>
-    /// Returns all rooms with Waiting status, mapped to RoomResponse.
+    /// Returns all rooms with Waiting status (legacy, unpaged). Prefer <see cref="ExecutePagedAsync"/>.
     /// </summary>
     public async Task<IEnumerable<RoomResponse>> ExecuteAsync(CancellationToken cancellationToken = default)
     {
@@ -22,14 +23,35 @@ public class ListRoomsUseCase
 
         return sessions
             .Where(s => s.Status == GameSessionStatus.Waiting)
-            .Select(s => new RoomResponse
-            {
-                Id          = s.Id,
-                RoomCode    = s.RoomCode,
-                MapSelected = s.MapSelected,
-                Status      = s.Status.ToString(),
-                PlayerCount = s.ConnectedPlayers.Count,
-                Players     = s.ConnectedPlayers.Select(p => p.Name)
-            });
+            .Select(MapToResponse);
     }
+
+    public async Task<PagedResult<RoomResponse>> ExecutePagedAsync(
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var (items, totalCount) = await _sessionRepository.GetWaitingPagedAsync(
+            page,
+            pageSize,
+            cancellationToken);
+
+        return new PagedResult<RoomResponse>
+        {
+            Items = items.Select(MapToResponse).ToList(),
+            Page = Math.Max(1, page),
+            PageSize = Math.Clamp(pageSize, 1, 100),
+            TotalCount = totalCount
+        };
+    }
+
+    private static RoomResponse MapToResponse(GameSession session) => new()
+    {
+        Id = session.Id,
+        RoomCode = session.RoomCode,
+        MapSelected = session.MapSelected,
+        Status = session.Status.ToString(),
+        PlayerCount = session.ConnectedPlayers.Count,
+        Players = session.ConnectedPlayers.Select(p => p.Name)
+    };
 }

@@ -3,6 +3,7 @@ using BattleTanks.GameServer;
 using BattleTanks.Infrastructure;
 using DotNetEnv;
 using Microsoft.OpenApi.Models;
+using StackExchange.Profiling;
 
 // Load .env file climbing up directories (supports running from src/ subdirectory)
 Env.TraversePath().Load();
@@ -12,6 +13,17 @@ var builder = WebApplication.CreateBuilder(args);
 // -----------------------------------------------------------------------
 // Services
 // -----------------------------------------------------------------------
+
+// MiniProfiler: instrumentação de latência HTTP e queries EF Core.
+// A interface /profiler/results-index só é exposta em Development.
+builder.Services.AddMiniProfiler(options =>
+{
+    options.RouteBasePath = "/profiler";
+    options.ColorScheme = ColorScheme.Dark;
+    options.PopupRenderPosition = RenderPosition.BottomLeft;
+    options.PopupShowTimeWithChildren = true;
+}).AddEntityFramework();
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddGameServer();
@@ -79,6 +91,13 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowFrontend");
+
+// MiniProfiler deve estar no pipeline antes do middleware de autenticação
+// para conseguir perfilar os handlers de forma completa.
+if (app.Environment.IsDevelopment())
+{
+    app.UseMiniProfiler();
+}
 
 app.UseHttpsRedirection();
 

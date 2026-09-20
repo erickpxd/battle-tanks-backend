@@ -1,0 +1,16 @@
+{
+  "runId": "mqtt-1787794872971",
+  "generatedAt": "2026-08-27T01:41:14.882Z",
+  "roomId": "LOAD-TEST",
+  "subscriberCount": 50,
+  "topics": [
+    "battle-tanks/LOAD-TEST/events/game/chat",
+    "battle-tanks/LOAD-TEST/events/game/power-up"
+  ],
+  "messagesPublished": 20,
+  "expectedDeliveries": 1000,
+  "receivedDeliveries": 1000,
+  "clientsComplete": 50,
+  "lostMessages": 0,
+  "deliveryRate": 1
+}

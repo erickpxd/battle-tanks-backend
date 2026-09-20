@@ -16,8 +16,33 @@ public class GameSessionRepository : IGameSessionRepository
 
     public async Task<IEnumerable<GameSession>> GetAllAsync(CancellationToken cancellationToken = default)
         => await _context.GameSessions
+            .AsNoTracking()
             .Include(s => s.ConnectedPlayers)
             .ToListAsync(cancellationToken);
+
+    public async Task<(IReadOnlyList<GameSession> Items, int TotalCount)> GetWaitingPagedAsync(
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = _context.GameSessions
+            .AsNoTracking()
+            .Where(s => s.Status == GameSessionStatus.Waiting);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .Include(s => s.ConnectedPlayers)
+            .OrderBy(s => s.RoomCode)
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
 
     public async Task<GameSession?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         => await _context.GameSessions
@@ -25,18 +50,27 @@ public class GameSessionRepository : IGameSessionRepository
             .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
 
     public async Task<GameSession?> GetByRoomCodeAsync(string roomCode, CancellationToken cancellationToken = default)
-        => await _context.GameSessions
+    {
+        var normalized = NormalizeRoomCode(roomCode);
+        // Tracked: join/leave mutates ConnectedPlayers.
+        return await _context.GameSessions
             .Include(s => s.ConnectedPlayers)
-            .FirstOrDefaultAsync(
-                s => s.RoomCode.ToUpper() == roomCode.ToUpper(),
-                cancellationToken);
+            .FirstOrDefaultAsync(s => s.RoomCode == normalized, cancellationToken);
+    }
 
     public async Task<bool> RoomCodeExistsAsync(string roomCode, CancellationToken cancellationToken = default)
-        => await _context.GameSessions
-            .AnyAsync(s => s.RoomCode.ToUpper() == roomCode.ToUpper(), cancellationToken);
+    {
+        var normalized = NormalizeRoomCode(roomCode);
+        return await _context.GameSessions
+            .AsNoTracking()
+            .AnyAsync(s => s.RoomCode == normalized, cancellationToken);
+    }
 
     public async Task AddAsync(GameSession session, CancellationToken cancellationToken = default)
-        => await _context.GameSessions.AddAsync(session, cancellationToken);
+    {
+        session.RoomCode = NormalizeRoomCode(session.RoomCode);
+        await _context.GameSessions.AddAsync(session, cancellationToken);
+    }
 
     public Task UpdateAsync(GameSession session, CancellationToken cancellationToken = default)
     {
@@ -46,4 +80,7 @@ public class GameSessionRepository : IGameSessionRepository
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
         => await _context.SaveChangesAsync(cancellationToken);
+
+    internal static string NormalizeRoomCode(string roomCode)
+        => roomCode.Trim().ToUpperInvariant();
 }

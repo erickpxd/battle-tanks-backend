@@ -27,13 +27,16 @@ public class RoomController : ControllerBase
     }
 
     /// <summary>
-    /// Returns all available rooms with Waiting status. No authentication required.
+    /// Returns available rooms with Waiting status (paginated). No authentication required.
     /// </summary>
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListRooms(CancellationToken cancellationToken)
+    public async Task<IActionResult> ListRooms(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
-        var rooms = await _listRoomsUseCase.ExecuteAsync(cancellationToken);
+        var rooms = await _listRoomsUseCase.ExecutePagedAsync(page, pageSize, cancellationToken);
         return Ok(rooms);
     }
 
