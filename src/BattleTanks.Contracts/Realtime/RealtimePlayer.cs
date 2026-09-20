@@ -14,4 +14,5 @@ public sealed record RealtimePlayer(
     DateTime? ShieldExpiresAt = null,
     DateTime? SpeedBoostExpiresAt = null,
     DateTime? DoubleDamageExpiresAt = null,
-    DateTime? MachineGunExpiresAt = null);
+    DateTime? MachineGunExpiresAt = null,
+    bool Ready = false);

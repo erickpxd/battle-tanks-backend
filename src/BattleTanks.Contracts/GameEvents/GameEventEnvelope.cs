@@ -46,7 +46,9 @@ public sealed record MapTileDestroyedEventData(int Column, int Row);
 public sealed record GameEndedEventData(
     Guid DefeatedPlayerId,
     Guid? WinnerPlayerId,
-    string TriggerEventId);
+    string TriggerEventId,
+    string? DefeatedPlayerName = null,
+    string? WinnerPlayerName = null);
 
 public static class GameEventJson
 {
