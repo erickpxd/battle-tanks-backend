@@ -14,6 +14,12 @@ public interface IGameRoomState
 
     RealtimePlayer Hit(string connectionId, PlayerHitRequest request, DateTime serverReceivedAt);
 
+    ReadyResult SetReady(string connectionId, bool ready);
+
+    RealtimePlayer Surrender(string connectionId, DateTime serverReceivedAt, string eventId);
+
+    GameOutcome? TryFinishGame(string roomCode, Guid defeatedPlayerId, string triggerEventId);
+
     PowerUpCollectionResult CollectPowerUp(
         string connectionId,
         CollectPowerUpRequest request,
@@ -50,3 +56,12 @@ public sealed record PowerUpUpdate(
 public sealed record RoomPowerUpUpdate(
     string RoomCode,
     IReadOnlyList<RealtimePowerUp> ActivePowerUps);
+
+public sealed record ReadyResult(
+    IReadOnlyList<RealtimePlayer> Players,
+    bool AllReady);
+
+public sealed record GameOutcome(
+    RealtimePlayer DefeatedPlayer,
+    RealtimePlayer? WinnerPlayer,
+    string TriggerEventId);
